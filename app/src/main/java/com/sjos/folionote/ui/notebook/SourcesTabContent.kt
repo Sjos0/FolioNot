@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Language
@@ -85,6 +86,7 @@ import com.sjos.folionote.ui.theme.AccentTeal
 fun SourcesTabContent(
     state: NotebookUiState,
     onAddFilesClick: () -> Unit,
+    onAddGoogleDriveClick: () -> Unit = {},
     onCreateNote: (String, String) -> Unit,
     onImportWebUrl: (String) -> Unit,
     onSearchChange: (String) -> Unit,
@@ -230,6 +232,18 @@ fun SourcesTabContent(
                     Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Adicionar URL", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                OutlinedButton(
+                    onClick = onAddGoogleDriveClick,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("add_google_drive_source_button")
+                ) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Google Drive", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

@@ -255,6 +255,31 @@ fun DriveBackupSyncScreen(
                                         }
                                     }
 
+                                    if (settings.driveNeedsReauth) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "A autorização do Google Drive expirou ou foi revogada. Reconecte sua conta nas Configurações para retomar a sincronização.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                                OutlinedButton(
+                                                    onClick = onOpenSettings,
+                                                    shape = CircleShape
+                                                ) {
+                                                    Text("Reconectar nas Configurações")
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     runtime.lastError?.let { err ->
                                         Surface(
                                             color = MaterialTheme.colorScheme.errorContainer,

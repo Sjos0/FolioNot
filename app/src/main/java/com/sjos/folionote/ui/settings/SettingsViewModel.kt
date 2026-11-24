@@ -15,7 +15,7 @@ import com.sjos.folionote.data.local.SyncConflictEntity
 import com.sjos.folionote.engine.document.StorageStats
 import com.sjos.folionote.engine.drive.DriveSyncRuntimeState
 import com.sjos.folionote.engine.drive.DriveSyncWorker
-import com.sjos.folionote.engine.drive.GooglePlayServicesAuthOutcome
+import com.sjos.folionote.engine.drive.GoogleConnectOutcome
 import com.sjos.folionote.ui.theme.ThemePreference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -265,69 +265,50 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun setDriveOAuthClientId(clientId: String) {
-        viewModelScope.launch {
-            prefsStore.setDriveOAuthClientId(clientId)
-            statusMessage.value = "OAuth Client ID salvo."
-        }
-    }
-
-    fun connectGoogleViaPlayServices(
+    fun connectGoogleDrive(
         activity: Activity,
+        switchAccount: Boolean = false,
         onNeedsResolution: (IntentSenderRequest) -> Unit
     ) {
         viewModelScope.launch {
             isConnectingGoogle.value = true
-            when (val outcome = driveAuth.requestPlayServicesAuthorization(activity)) {
-                is GooglePlayServicesAuthOutcome.Authorized -> {
-                    val res = driveAuth.saveAccessTokenAndLoadProfile(outcome.accessToken, refreshToken = null)
+            when (val outcome = driveAuth.connectGoogleAccount(activity, switchAccount = switchAccount)) {
+                is GoogleConnectOutcome.Connected -> {
                     isConnectingGoogle.value = false
-                    res.onSuccess { profile ->
-                        statusMessage.value = "Conta Google conectada: ${profile.email}"
-                    }.onFailure { err ->
-                        statusMessage.value = err.message ?: "Erro ao carregar perfil Google."
+                    if (uiState.value.settings.driveSyncEnabled) {
+                        DriveSyncWorker.schedulePeriodicSync(container.appContext, true)
                     }
+                    statusMessage.value = "Conta Google conectada: ${outcome.profile.email}"
                 }
-                is GooglePlayServicesAuthOutcome.NeedsConsentResolution -> {
+                is GoogleConnectOutcome.NeedsConsentResolution -> {
                     isConnectingGoogle.value = false
-                    val pendingIntent = outcome.result.pendingIntent
-                    if (pendingIntent != null) {
-                        onNeedsResolution(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-                    } else {
-                        statusMessage.value = "Consentimento do Google indisponível; tente o fluxo OAuth PKCE."
-                    }
+                    onNeedsResolution(outcome.intentSenderRequest)
                 }
-                is GooglePlayServicesAuthOutcome.Failed -> {
+                GoogleConnectOutcome.Cancelled -> {
                     isConnectingGoogle.value = false
-                    val clientId = driveAuth.resolveEffectiveOAuthClientId(uiState.value.settings)
-                    if (outcome.canFallbackToPkce && clientId.isNotBlank()) {
-                        launchPkceAuth(activity)
-                    } else {
-                        statusMessage.value = outcome.message
-                    }
+                    statusMessage.value = "Conexão Google cancelada."
+                }
+                is GoogleConnectOutcome.Failed -> {
+                    isConnectingGoogle.value = false
+                    statusMessage.value = outcome.message
                 }
             }
         }
     }
 
-    fun completePlayServicesAuth(activity: Activity, data: Intent?) {
+    fun completeGoogleConsent(activity: Activity, data: Intent?) {
         viewModelScope.launch {
             isConnectingGoogle.value = true
-            val res = driveAuth.completePlayServicesAuthorizationResult(data, activity)
+            val res = driveAuth.completeAuthorizationResult(activity, data)
             isConnectingGoogle.value = false
             res.onSuccess { profile ->
+                if (uiState.value.settings.driveSyncEnabled) {
+                    DriveSyncWorker.schedulePeriodicSync(container.appContext, true)
+                }
                 statusMessage.value = "Conta Google conectada: ${profile.email}"
             }.onFailure { err ->
                 statusMessage.value = err.message ?: "Autorização Google cancelada ou falhou."
             }
-        }
-    }
-
-    fun launchPkceAuth(activity: Activity) {
-        val clientId = driveAuth.resolveEffectiveOAuthClientId(uiState.value.settings)
-        val res = driveAuth.launchPkceBrowserFlow(activity, clientId)
-        res.onFailure { err ->
-            statusMessage.value = err.message ?: "Configure um OAuth Client ID (Android) para o fluxo PKCE."
         }
     }
 

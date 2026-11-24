@@ -68,7 +68,7 @@ data class AppSettings(
     val driveEncryptedAccessToken: String = "",
     val driveEncryptedRefreshToken: String = "",
     val driveTokenExpiresAt: Long = 0L,
-    val driveOAuthClientId: String = "",
+    val driveNeedsReauth: Boolean = false,
     val driveSyncEnabled: Boolean = false,
     val driveConflictPolicy: DriveConflictPolicy = DriveConflictPolicy.ASK_USER,
     val driveLastBackupAt: Long? = null,
@@ -126,7 +126,7 @@ class AppPreferencesStore(private val context: Context) {
         val DRIVE_ENC_ACCESS_TOKEN = stringPreferencesKey("drive_enc_access_token")
         val DRIVE_ENC_REFRESH_TOKEN = stringPreferencesKey("drive_enc_refresh_token")
         val DRIVE_TOKEN_EXPIRES_AT = longPreferencesKey("drive_token_expires_at")
-        val DRIVE_OAUTH_CLIENT_ID = stringPreferencesKey("drive_oauth_client_id")
+        val DRIVE_NEEDS_REAUTH = booleanPreferencesKey("drive_needs_reauth")
         val DRIVE_SYNC_ENABLED = booleanPreferencesKey("drive_sync_enabled")
         val DRIVE_CONFLICT_POLICY = stringPreferencesKey("drive_conflict_policy")
         val DRIVE_LAST_BACKUP_AT = longPreferencesKey("drive_last_backup_at")
@@ -178,7 +178,7 @@ class AppPreferencesStore(private val context: Context) {
             driveEncryptedAccessToken = prefs[Keys.DRIVE_ENC_ACCESS_TOKEN].orEmpty(),
             driveEncryptedRefreshToken = prefs[Keys.DRIVE_ENC_REFRESH_TOKEN].orEmpty(),
             driveTokenExpiresAt = prefs[Keys.DRIVE_TOKEN_EXPIRES_AT] ?: 0L,
-            driveOAuthClientId = prefs[Keys.DRIVE_OAUTH_CLIENT_ID].orEmpty(),
+            driveNeedsReauth = prefs[Keys.DRIVE_NEEDS_REAUTH] ?: false,
             driveSyncEnabled = prefs[Keys.DRIVE_SYNC_ENABLED] ?: false,
             driveConflictPolicy = conflictPolicy,
             driveLastBackupAt = prefs[Keys.DRIVE_LAST_BACKUP_AT],
@@ -300,15 +300,31 @@ class AppPreferencesStore(private val context: Context) {
         expiresAt: Long
     ) {
         context.dataStore.edit { prefs ->
+            val previousEmail = prefs[Keys.DRIVE_EMAIL]
+            val isAccountSwitch = !previousEmail.isNullOrBlank() && !previousEmail.equals(email, ignoreCase = true)
+
             prefs[Keys.DRIVE_EMAIL] = email
             if (!displayName.isNullOrBlank()) prefs[Keys.DRIVE_NAME] = displayName else prefs.remove(Keys.DRIVE_NAME)
             if (!photoUrl.isNullOrBlank()) prefs[Keys.DRIVE_PHOTO_URL] = photoUrl else prefs.remove(Keys.DRIVE_PHOTO_URL)
-            prefs[Keys.DRIVE_ENC_ACCESS_TOKEN] = encryptedAccessToken
+            if (encryptedAccessToken.isNotBlank()) {
+                prefs[Keys.DRIVE_ENC_ACCESS_TOKEN] = encryptedAccessToken
+            }
             if (!encryptedRefreshToken.isNullOrBlank()) {
                 prefs[Keys.DRIVE_ENC_REFRESH_TOKEN] = encryptedRefreshToken
+            } else if (isAccountSwitch) {
+                prefs.remove(Keys.DRIVE_ENC_REFRESH_TOKEN)
             }
             prefs[Keys.DRIVE_TOKEN_EXPIRES_AT] = expiresAt
+            prefs[Keys.DRIVE_NEEDS_REAUTH] = false
             prefs.remove(Keys.DRIVE_LAST_SYNC_ERROR)
+        }
+    }
+
+    suspend fun markDriveNeedsReauth(errorMessage: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.DRIVE_NEEDS_REAUTH] = true
+            prefs[Keys.DRIVE_LAST_SYNC_STATUS] = "Reautorização Google necessária"
+            prefs[Keys.DRIVE_LAST_SYNC_ERROR] = errorMessage
         }
     }
 
@@ -320,15 +336,9 @@ class AppPreferencesStore(private val context: Context) {
             prefs.remove(Keys.DRIVE_ENC_ACCESS_TOKEN)
             prefs.remove(Keys.DRIVE_ENC_REFRESH_TOKEN)
             prefs.remove(Keys.DRIVE_TOKEN_EXPIRES_AT)
+            prefs.remove(Keys.DRIVE_NEEDS_REAUTH)
             prefs[Keys.DRIVE_SYNC_ENABLED] = false
             prefs.remove(Keys.DRIVE_LAST_SYNC_ERROR)
-        }
-    }
-
-    suspend fun setDriveOAuthClientId(clientId: String) {
-        context.dataStore.edit { prefs ->
-            if (clientId.isBlank()) prefs.remove(Keys.DRIVE_OAUTH_CLIENT_ID)
-            else prefs[Keys.DRIVE_OAUTH_CLIENT_ID] = clientId.trim()
         }
     }
 
@@ -368,6 +378,8 @@ class AppPreferencesStore(private val context: Context) {
             prefs.remove(Keys.TRANS_ENC_KEY)
             prefs.remove(Keys.DRIVE_ENC_ACCESS_TOKEN)
             prefs.remove(Keys.DRIVE_ENC_REFRESH_TOKEN)
+            prefs.remove(Keys.DRIVE_TOKEN_EXPIRES_AT)
+            prefs.remove(Keys.DRIVE_NEEDS_REAUTH)
         }
     }
 

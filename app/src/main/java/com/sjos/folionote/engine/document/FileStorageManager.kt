@@ -32,6 +32,13 @@ data class StorageStats(
 
 class FileStorageManager(private val context: Context) {
 
+    fun isGoogleDriveUri(uri: Uri): Boolean {
+        val authority = uri.authority?.lowercase().orEmpty()
+        val full = uri.toString().lowercase()
+        return authority.contains("docs.storage") ||
+            full.contains("com.google.android.apps.docs")
+    }
+
     fun importFromUri(notebookId: String, uri: Uri): StoredSourceFile {
         val resolver = context.contentResolver
         val rawName = queryDisplayName(uri) ?: "documento_${System.currentTimeMillis()}"
@@ -54,6 +61,40 @@ class FileStorageManager(private val context: Context) {
             sourceId = sourceId,
             displayName = rawName,
             mimeType = mimeType,
+            sourceType = sourceType,
+            file = targetFile,
+            sizeBytes = targetFile.length(),
+            sha256 = sha256
+        )
+    }
+
+    fun importFromLocalFile(
+        notebookId: String,
+        sourceFile: File,
+        displayName: String,
+        mimeType: String
+    ): StoredSourceFile {
+        require(sourceFile.exists()) { "Arquivo baixado não encontrado." }
+        val resolvedName = displayName.trim().ifBlank { sourceFile.name }
+        val resolvedMime = mimeType.trim().ifBlank { guessMimeFromName(resolvedName) }
+        val sourceType = detectSourceType(resolvedName, resolvedMime)
+        val sourceId = UUID.randomUUID().toString()
+
+        val targetDir = notebookSourcesDir(notebookId)
+        val safeName = resolvedName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        val targetFile = File(targetDir, "${sourceId}_$safeName")
+
+        sourceFile.inputStream().use { input ->
+            FileOutputStream(targetFile).use { output ->
+                input.copyTo(output, bufferSize = 16 * 1024)
+            }
+        }
+
+        val sha256 = computeSha256(targetFile)
+        return StoredSourceFile(
+            sourceId = sourceId,
+            displayName = resolvedName,
+            mimeType = resolvedMime,
             sourceType = sourceType,
             file = targetFile,
             sizeBytes = targetFile.length(),

@@ -26,8 +26,21 @@ data class DriveFileItem(
     val modifiedTime: String,
     val modifiedEpochMs: Long,
     val md5Checksum: String? = null,
-    val appProperties: Map<String, String> = emptyMap()
+    val appProperties: Map<String, String> = emptyMap(),
+    val mimeType: String = "application/octet-stream",
+    val webViewLink: String? = null
 )
+
+data class DriveDownloadedDocument(
+    val file: File,
+    val resolvedName: String,
+    val resolvedMimeType: String
+)
+
+class DriveHttpException(
+    val code: Int,
+    message: String
+) : IllegalStateException(message)
 
 /**
  * Google Drive v3 REST client scoped to `appDataFolder` + app-created files.
@@ -75,7 +88,7 @@ class GoogleDriveApiClient(
             client.newCall(req).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException("Google Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
+                    throw DriveHttpException(resp.code, "Google Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
                 }
                 val root = JSONObject(raw)
                 val filesArr = root.optJSONArray("files") ?: return@runCatching emptyList()
@@ -87,6 +100,140 @@ class GoogleDriveApiClient(
                 out
             }
         }
+    }
+
+    /**
+     * Lists user-visible documents in Google Drive (separate from private `appDataFolder` backups)
+     * for importing existing files as notebook sources.
+     */
+    suspend fun listUserDriveFiles(
+        accessToken: String,
+        nameQuery: String? = null,
+        pageSize: Int = 50
+    ): Result<List<DriveFileItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val client = baseHttpClient.newBuilder()
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+
+            val baseFilter = "trashed = false and mimeType != 'application/vnd.google-apps.folder'"
+            val cleanQuery = nameQuery?.trim()?.replace("'", "\\'")
+            val fullQuery = if (!cleanQuery.isNullOrBlank()) {
+                "$baseFilter and name contains '$cleanQuery'"
+            } else {
+                baseFilter
+            }
+
+            val urlBuilder = "${driveApiBaseUrl.trimEnd('/')}/files".toHttpUrl().newBuilder()
+                .addQueryParameter("spaces", "drive")
+                .addQueryParameter("pageSize", pageSize.coerceIn(1, 200).toString())
+                .addQueryParameter("orderBy", "modifiedTime desc")
+                .addQueryParameter("q", fullQuery)
+                .addQueryParameter("fields", "files(id,name,mimeType,size,modifiedTime,md5Checksum,webViewLink)")
+
+            val req = Request.Builder()
+                .url(urlBuilder.build())
+                .header("Authorization", "Bearer $accessToken")
+                .get()
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    throw DriveHttpException(resp.code, "Google Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
+                }
+                val root = JSONObject(raw)
+                val filesArr = root.optJSONArray("files") ?: return@runCatching emptyList()
+                val out = mutableListOf<DriveFileItem>()
+                for (i in 0 until filesArr.length()) {
+                    val obj = filesArr.optJSONObject(i) ?: continue
+                    out.add(parseDriveFile(obj))
+                }
+                out
+            }
+        }
+    }
+
+    suspend fun downloadOrExportDriveFile(
+        accessToken: String,
+        item: DriveFileItem,
+        destDir: File,
+        onProgress: (Float) -> Unit = {},
+        isCancelled: () -> Boolean = { false }
+    ): Result<DriveDownloadedDocument> = withContext(Dispatchers.IO) {
+        val exportSpec = googleWorkspaceExportSpec(item.mimeType)
+        if (exportSpec == null) {
+            val safeName = item.name.ifBlank { "drive_${item.id}" }.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val destFile = File(destDir, safeName)
+            return@withContext downloadFile(
+                accessToken = accessToken,
+                fileId = item.id,
+                destFile = destFile,
+                resumeIfPartial = false,
+                onProgress = onProgress,
+                isCancelled = isCancelled
+            ).map { file ->
+                DriveDownloadedDocument(
+                    file = file,
+                    resolvedName = item.name.ifBlank { file.name },
+                    resolvedMimeType = item.mimeType.ifBlank { "application/octet-stream" }
+                )
+            }
+        }
+
+        val (exportMime, ext) = exportSpec
+        val baseName = item.name.ifBlank { "documento_${item.id}" }
+        val resolvedName = if (baseName.endsWith(ext, ignoreCase = true)) baseName else "$baseName$ext"
+        val safeName = resolvedName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        val destFile = File(destDir, safeName)
+
+        runCatching {
+            destDir.mkdirs()
+            val client = baseHttpClient.newBuilder()
+                .readTimeout(60, TimeUnit.SECONDS)
+                .build()
+            val url = "${driveApiBaseUrl.trimEnd('/')}/files/${item.id}/export".toHttpUrl().newBuilder()
+                .addQueryParameter("mimeType", exportMime)
+                .build()
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $accessToken")
+                .get()
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val raw = resp.body?.string().orEmpty()
+                    throw DriveHttpException(resp.code, "Export Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
+                }
+                val body = resp.body ?: throw IllegalStateException("Resposta de exportação vazia.")
+                FileOutputStream(destFile).use { out ->
+                    body.byteStream().use { input ->
+                        val buf = ByteArray(16 * 1024)
+                        while (true) {
+                            if (isCancelled()) throw CancellationException("Importação cancelada pelo usuário.")
+                            val read = input.read(buf)
+                            if (read <= 0) break
+                            out.write(buf, 0, read)
+                        }
+                    }
+                }
+            }
+            onProgress(1f)
+            DriveDownloadedDocument(
+                file = destFile,
+                resolvedName = resolvedName,
+                resolvedMimeType = exportMime
+            )
+        }
+    }
+
+    private fun googleWorkspaceExportSpec(mimeType: String): Pair<String, String>? = when (mimeType) {
+        "application/vnd.google-apps.document" -> "application/pdf" to ".pdf"
+        "application/vnd.google-apps.presentation" -> "application/pdf" to ".pdf"
+        "application/vnd.google-apps.spreadsheet" -> "text/plain" to ".txt"
+        "application/vnd.google-apps.drawing" -> "image/png" to ".png"
+        else -> null
     }
 
     suspend fun findFileByNameInAppData(
@@ -334,7 +481,7 @@ class GoogleDriveApiClient(
             client.newCall(reqBuilder.build()).execute().use { resp ->
                 if (!resp.isSuccessful && resp.code != 206) {
                     val raw = resp.body?.string().orEmpty()
-                    throw IllegalStateException("Download HTTP ${resp.code}: ${extractGoogleError(raw)}")
+                    throw DriveHttpException(resp.code, "Download HTTP ${resp.code}: ${extractGoogleError(raw)}")
                 }
 
                 val isPartialAppend = resp.code == 206 && existingOffset > 0L
@@ -442,7 +589,9 @@ class GoogleDriveApiClient(
             modifiedTime = modified,
             modifiedEpochMs = parseIso8601Epoch(modified),
             md5Checksum = obj.optString("md5Checksum").takeIf { it.isNotBlank() },
-            appProperties = props
+            appProperties = props,
+            mimeType = obj.optString("mimeType").ifBlank { "application/octet-stream" },
+            webViewLink = obj.optString("webViewLink").takeIf { it.isNotBlank() }
         )
     }
 

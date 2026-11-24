@@ -300,9 +300,9 @@ class Phase7GoogleDriveAndSyncTests {
         }
     }
 
-    // Test 12: Google OAuth PKCE flow, token refresh, Keystore persistence, and safe disconnect/revoke
+    // Test 12: Native Google Sign-In + AuthorizationClient flow, silent renewal, Keystore persistence, and safe disconnect/revoke
     @Test
-    fun `google oauth pkce flow refreshes tokens encrypts in keystore and revokes safely without touching gemini key`() = runTest {
+    fun `native google drive auth refreshes tokens encrypts in keystore and revokes safely without touching gemini key`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
@@ -313,55 +313,92 @@ class Phase7GoogleDriveAndSyncTests {
             prefs.clearDriveAccountSession()
             prefs.saveGeminiEmbeddingConfig(true, "gemini-embedding-2-preview", 768, crypto.encrypt("AIzaKeepMyGeminiKey"))
 
+            var silentCalls = 0
+            var revokedGateway = false
+            var clearedCreds = false
+            val fakeAuthenticator = object : com.sjos.folionote.engine.drive.GoogleCredentialAuthenticator {
+                override suspend fun authenticate(
+                    activity: android.app.Activity,
+                    serverClientId: String
+                ) = com.sjos.folionote.engine.drive.CredentialAuthResult.Authenticated(
+                    profile = com.sjos.folionote.engine.drive.GoogleAccountProfile(
+                        email = "pesquisador@folionote.app",
+                        displayName = "Pesquisador FolioNote"
+                    ),
+                    idToken = "id_token_123"
+                )
+
+                override suspend fun clearSession() {
+                    clearedCreds = true
+                }
+            }
+            val fakeGateway = object : com.sjos.folionote.engine.drive.DriveAuthorizationGateway {
+                override suspend fun authorize(
+                    context: Context,
+                    scopes: List<String>,
+                    accountEmail: String?
+                ): com.sjos.folionote.engine.drive.DriveAuthResult {
+                    silentCalls++
+                    assertTrue(scopes.contains(GoogleDriveAuthManager.SCOPE_DRIVE_APPDATA))
+                    assertFalse(scopes.contains(GoogleDriveAuthManager.SCOPE_DRIVE_READONLY))
+                    return com.sjos.folionote.engine.drive.DriveAuthResult.Authorized(
+                        accessToken = if (silentCalls == 1) "ya29.initial_access_token" else "ya29.silent_renewed_token",
+                        expiresInSeconds = 3600L
+                    )
+                }
+
+                override fun extractAuthorizationFromIntent(
+                    context: Context,
+                    data: android.content.Intent?
+                ) = com.sjos.folionote.engine.drive.DriveAuthResult.Cancelled
+
+                override suspend fun revokeAccess(context: Context, scopes: List<String>, accountEmail: String?) {
+                    revokedGateway = true
+                }
+            }
+
             val port = fakeDrive.port
+            val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
             val authManager = GoogleDriveAuthManager(
                 context = context,
                 preferencesStore = prefs,
                 cryptoManager = crypto,
                 baseHttpClient = OkHttpClient(),
                 oauthBaseUrl = "http://127.0.0.1:$port/oauth2",
-                authPageBaseUrl = "https://accounts.google.com/o/oauth2/v2/auth",
-                userInfoUrl = "http://127.0.0.1:$port/userinfo"
+                userInfoUrl = "http://127.0.0.1:$port/userinfo",
+                credentialAuthenticator = fakeAuthenticator,
+                authorizationGateway = fakeGateway,
+                serverClientIdProvider = { "web-client-dev.apps.googleusercontent.com" }
             )
 
-            // 1. Build PKCE S256 request
-            val pkce = authManager.buildPkceAuthorizationRequest("client-123.apps.googleusercontent.com")
-            assertEquals("S256", pkce.authorizationUri.getQueryParameter("code_challenge_method"))
-            assertEquals(GoogleDriveAuthManager.REDIRECT_URI, pkce.authorizationUri.getQueryParameter("redirect_uri"))
-            assertTrue(pkce.authorizationUri.getQueryParameter("scope").orEmpty().contains("drive.appdata"))
-
-            // 2. Reject mismatched CSRF state
-            val badRedirect = Uri.parse("com.sjos.folionote://oauth2redirect?code=abc&state=wrong_state")
-            assertTrue(authManager.handleOAuthRedirectUri(badRedirect).isFailure)
-
-            // 3. Valid redirect completes exchange + loads profile + encrypts tokens
-            val pkce2 = authManager.buildPkceAuthorizationRequest("client-123.apps.googleusercontent.com")
-            val goodRedirect = Uri.parse("com.sjos.folionote://oauth2redirect?code=auth_code_xyz&state=${pkce2.state}")
-            val profile = authManager.handleOAuthRedirectUri(goodRedirect).getOrThrow()
+            // 1. Connect via Credential Manager + AuthorizationClient
+            val outcome = authManager.connectGoogleAccount(activity)
+            assertTrue(outcome is com.sjos.folionote.engine.drive.GoogleConnectOutcome.Connected)
+            val profile = (outcome as com.sjos.folionote.engine.drive.GoogleConnectOutcome.Connected).profile
             assertEquals("pesquisador@folionote.app", profile.email)
 
             val saved = prefs.settingsFlow.first()
             assertTrue(saved.isGoogleDriveConnected)
             assertFalse(saved.driveEncryptedAccessToken.contains("ya29.initial_access_token"))
             assertEquals("ya29.initial_access_token", crypto.decrypt(saved.driveEncryptedAccessToken))
-            assertEquals("1//refresh_token_secret", crypto.decrypt(saved.driveEncryptedRefreshToken))
 
-            // 4. Refresh expired token
-            prefs.setDriveOAuthClientId("client-123.apps.googleusercontent.com")
+            // 2. Expired token triggers silent AuthorizationClient renewal cleanly
             prefs.saveDriveAccountSession(
                 email = saved.driveAccountEmail!!,
                 displayName = saved.driveAccountName,
                 photoUrl = saved.driveAccountPhotoUrl,
                 encryptedAccessToken = saved.driveEncryptedAccessToken,
-                encryptedRefreshToken = saved.driveEncryptedRefreshToken,
+                encryptedRefreshToken = null,
                 expiresAt = System.currentTimeMillis() - 10_000L
             )
             val refreshedToken = authManager.getValidAccessToken().getOrThrow()
-            assertEquals("ya29.refreshed_access_token", refreshedToken)
+            assertEquals("ya29.silent_renewed_token", refreshedToken)
 
-            // 5. Disconnect & revoke removes Drive tokens cleanly while keeping Gemini Embedding 2 key untouched!
+            // 3. Disconnect & revoke removes Drive tokens cleanly while keeping Gemini Embedding 2 key untouched!
             authManager.disconnectAndRevoke()
-            assertTrue(fakeDrive.revokedTokens.any { it.contains("1%2F%2Frefresh_token_secret") || it.contains("refresh_token_secret") })
+            assertTrue(revokedGateway)
+            assertTrue(clearedCreds)
+            assertTrue(fakeDrive.revokedTokens.any { it.contains("ya29.silent_renewed_token") })
             val afterDisconnect = prefs.settingsFlow.first()
             assertFalse(afterDisconnect.isGoogleDriveConnected)
             assertNull(afterDisconnect.driveAccountEmail)

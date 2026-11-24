@@ -13,15 +13,19 @@ import com.sjos.folionote.data.local.StudioArtifactEntity
 import com.sjos.folionote.data.local.SyncTombstoneEntity
 import com.sjos.folionote.engine.document.FileStorageManager
 import com.sjos.folionote.engine.document.StorageStats
+import com.sjos.folionote.engine.drive.DriveFileItem
 import com.sjos.folionote.engine.drive.DriveSyncEngine
+import com.sjos.folionote.engine.drive.GoogleDriveApiClient
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.retrieval.RetrievedPassage
 import com.sjos.folionote.engine.web.WebClipperEngine
 import com.sjos.folionote.engine.worker.SourcePipelineManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 data class GlobalSearchResults(
@@ -120,8 +124,21 @@ class NotebookRepository(
         notebookDao.deleteCollectionById(collectionId)
     }
 
-    suspend fun importUriSource(notebookId: String, uri: Uri): SourceEntity = withContext(Dispatchers.IO) {
+    suspend fun importUriSource(
+        notebookId: String,
+        uri: Uri,
+        isFromGoogleDrive: Boolean = false
+    ): SourceEntity = withContext(Dispatchers.IO) {
         val stored = fileStorageManager.importFromUri(notebookId, uri)
+        val fromDrive = isFromGoogleDrive || fileStorageManager.isGoogleDriveUri(uri)
+        val metaJson = if (fromDrive) {
+            JSONObject().apply {
+                put("origin", "google_drive")
+                put("drive_uri", uri.toString())
+            }.toString()
+        } else {
+            "{}"
+        }
         val source = SourceEntity(
             id = stored.sourceId,
             notebookId = notebookId,
@@ -131,12 +148,73 @@ class NotebookRepository(
             filePath = stored.file.absolutePath,
             sizeBytes = stored.sizeBytes,
             fileHashSha256 = stored.sha256,
+            metadataJson = metaJson,
             processingStatus = SourceStatus.PENDING.name,
             indexingProgress = 0.05f
         )
         sourceDao.upsertSource(source)
         pipelineManager.scheduleProcessing(notebookId, source.id, "IMPORT")
         source
+    }
+
+    suspend fun importDriveFile(
+        notebookId: String,
+        accessToken: String,
+        item: DriveFileItem,
+        apiClient: GoogleDriveApiClient,
+        isCancelled: () -> Boolean = { false }
+    ): Result<SourceEntity> = withContext(Dispatchers.IO) {
+        val tempDir = File(
+            System.getProperty("java.io.tmpdir") ?: "/tmp",
+            "folionote_drive_${UUID.randomUUID()}"
+        ).apply { mkdirs() }
+
+        try {
+            runCatching {
+                if (isCancelled()) throw CancellationException("Importação cancelada pelo usuário.")
+                val downloaded = apiClient.downloadOrExportDriveFile(
+                    accessToken = accessToken,
+                    item = item,
+                    destDir = tempDir,
+                    isCancelled = isCancelled
+                ).getOrThrow()
+
+                if (isCancelled()) throw CancellationException("Importação cancelada pelo usuário.")
+                val stored = fileStorageManager.importFromLocalFile(
+                    notebookId = notebookId,
+                    sourceFile = downloaded.file,
+                    displayName = downloaded.resolvedName,
+                    mimeType = downloaded.resolvedMimeType
+                )
+
+                val meta = JSONObject().apply {
+                    put("origin", "google_drive")
+                    put("drive_file_id", item.id)
+                    put("drive_mime_type", item.mimeType)
+                    if (item.modifiedTime.isNotBlank()) put("drive_modified_time", item.modifiedTime)
+                    if (!item.webViewLink.isNullOrBlank()) put("drive_web_view_link", item.webViewLink)
+                }.toString()
+
+                val source = SourceEntity(
+                    id = stored.sourceId,
+                    notebookId = notebookId,
+                    name = stored.displayName,
+                    mimeType = stored.mimeType,
+                    sourceType = stored.sourceType.name,
+                    filePath = stored.file.absolutePath,
+                    sizeBytes = stored.sizeBytes,
+                    fileHashSha256 = stored.sha256,
+                    metadataJson = meta,
+                    processingStatus = SourceStatus.PENDING.name,
+                    indexingProgress = 0.05f
+                )
+                sourceDao.upsertSource(source)
+                pipelineManager.scheduleProcessing(notebookId, source.id, "IMPORT")
+                source
+            }
+        } finally {
+            runCatching { tempDir.deleteRecursively() }
+        }
     }
 
     suspend fun createNoteSource(notebookId: String, title: String, content: String): SourceEntity = withContext(Dispatchers.IO) {

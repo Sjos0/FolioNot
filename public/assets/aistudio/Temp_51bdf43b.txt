@@ -1,0 +1,145 @@
+FOLIONOTE — REVISÃO E CORREÇÃO DA INTEGRAÇÃO GOOGLE DRIVE
+
+Faça uma revisão corretiva da implementação Google Drive da Fase 7, respeitando a arquitetura existente.
+
+Não recrie o projeto e não remova funcionalidades já implementadas.
+
+1. Experiência de conexão Google
+
+Quero uma experiência semelhante à dos aplicativos Android que oferecem conexão nativa com Google.
+
+O usuário não deve precisar:
+
+- Informar OAuth Client ID.
+- Configurar redirect URI.
+- Configurar PKCE.
+- Informar credenciais técnicas.
+- Configurar Google Cloud Console.
+
+A configuração de OAuth pertence ao desenvolvedor do FolioNote.
+
+Utilize as APIs oficiais recomendadas pelo Google:
+
+- Credential Manager para autenticação e identificação da conta.
+- Google Identity AuthorizationClient para autorização de acesso ao Google Drive.
+
+O aplicativo deve identificar a conta conectada, obter nome, e-mail e foto de perfil e apresentar essas informações nas configurações.
+
+O OAuth Android Client ID, package name e SHA-1 devem ser configurados internamente pelo desenvolvedor.
+
+Remova da interface os campos de configuração manual de Client ID e o fluxo PKCE apresentado ao usuário final, salvo se houver uma necessidade técnica comprovada que justifique sua manutenção interna.
+
+2. Corrigir gerenciamento e expiração de tokens
+
+Audite integralmente GoogleDriveAuthManager.
+
+Foram identificados estes problemas:
+
+- O fluxo AuthorizationClient salva access token sem refresh token.
+- getValidAccessToken pode retornar token expirado como sucesso.
+- refreshProfile limpa o refresh token.
+- refreshAccessToken também salva uma sessão sem preservar o refresh token.
+
+Corrija esses comportamentos.
+
+A implementação deve utilizar o mecanismo de autorização recomendado para aplicativos Android nativos.
+
+Não invente refresh tokens nem simule renovação.
+
+Se a autorização precisar ser renovada pelo AuthorizationClient, implemente o fluxo adequado e trate a necessidade de interação do usuário.
+
+Operações WorkManager não devem entrar em ciclos de falha com tokens expirados.
+
+Quando não for possível renovar a autorização silenciosamente, interrompa a sincronização de maneira controlada, informe o usuário e permita retomar após nova autorização.
+
+3. Separar backups de importação de arquivos
+
+Quero duas funcionalidades distintas.
+
+A. Backup e sincronização
+
+Manter o uso de appDataFolder para backups privados do FolioNote.
+
+Permitir:
+
+- Criar backup.
+- Listar backups.
+- Restaurar.
+- Renomear.
+- Excluir.
+- Sincronizar.
+- Resolver conflitos.
+
+A gestão continua sendo feita dentro do FolioNote.
+
+B. Importar arquivos do Google Drive
+
+Implementar uma nova ação:
+
+"Adicionar fonte → Google Drive"
+
+O usuário deve conseguir selecionar documentos existentes em sua conta Google Drive e importá-los para um notebook.
+
+Avalie a integração oficial Google Picker para Android.
+
+Respeite os requisitos específicos do Picker mobile, inclusive o escopo drive.file isolado, quando aplicável.
+
+Avalie também o seletor nativo Android Storage Access Framework como alternativa de experiência.
+
+Não solicite acesso irrestrito a todo o Drive quando não for necessário.
+
+Depois da seleção, o arquivo deve ser importado para o armazenamento local do FolioNote e passar pelo pipeline normal de ingestão e indexação.
+
+Preserve a referência da origem no Google Drive quando possível.
+
+4. Segurança e experiência
+
+- Não armazenar tokens em texto puro.
+- Não incluir credenciais em backups.
+- Não imprimir tokens nos logs.
+- Não pedir senha Google.
+- Não expor configurações técnicas ao usuário.
+- Tratar desconexão, revogação e troca de conta.
+- Não perder dados durante falhas de sincronização.
+
+5. Testes
+
+Adicionar testes para:
+
+- Seleção e identificação da conta.
+- Autorização Drive.
+- Expiração de access token.
+- Renovação ou nova autorização.
+- Preservação de credenciais.
+- Interrupção e retomada de sincronização.
+- Importação de arquivos existentes no Drive.
+- Cancelamento da seleção.
+- Falhas de rede.
+- Troca e desconexão da conta.
+
+6. Entrega
+
+Apresente a relação dos arquivos modificados, decisões técnicas, testes criados e limitações reais.
+
+Não execute builds, compilações ou tarefas Gradle no Google AI Studio.
+
+Envie as alterações ao repositório Sjos0/FolioNot.
+
+O Ameno continuará responsável por testes independentes, builds e publicação do APK oficial assinado.
+
+---
+DECISÃO DEFINITIVA — PRIVACIDADE DOS BACKUPS NO GOOGLE DRIVE
+
+O usuário confirmou que os backups do FolioNote devem permanecer privados, seguindo o modelo do backup do WhatsApp.
+
+Requisitos obrigatórios:
+
+1. Utilize o escopo "appDataFolder" do Google Drive para armazenar os backups privados do aplicativo.
+2. Não crie uma pasta pública ou convencional chamada "FolioNote" em Meu Drive.
+3. Os backups devem ser criados, atualizados, listados, restaurados e excluídos exclusivamente pelo próprio FolioNote.
+4. Não exiba os arquivos de backup na interface comum do Google Drive.
+5. Mantenha a importação de documentos existentes do Google Drive como uma funcionalidade independente: o usuário poderá selecionar arquivos para adicioná-los como fontes aos seus cadernos.
+6. Não confunda a autorização necessária para importar arquivos com o armazenamento privado dos backups. Preserve os escopos mínimos necessários para cada operação.
+7. Implemente e teste a criação, atualização, restauração, exclusão e recuperação de backups privados, incluindo falhas de conexão e sincronização.
+
+Importante: não altere essa decisão por conveniência técnica. A privacidade dos backups é um requisito de produto.

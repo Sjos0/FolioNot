@@ -1,5 +1,8 @@
 package com.sjos.folionote.ui.notebook
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -21,16 +24,22 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,8 +49,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -58,6 +69,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,12 +89,30 @@ fun NotebookWorkspaceScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showConfigSheet by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
     var showBudgetDialog by remember { mutableStateOf(false) }
     var showCustomizeDialog by remember { mutableStateOf(false) }
+    var showGoogleDriveSheet by remember { mutableStateOf(false) }
+
+    val supportedMimeTypes = remember {
+        arrayOf(
+            "application/pdf",
+            "text/plain",
+            "text/markdown",
+            "text/html",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/epub+zip",
+            "image/*",
+            "audio/*",
+            "video/*",
+            "*/*"
+        )
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -90,6 +120,21 @@ fun NotebookWorkspaceScreen(
         if (uris.isNotEmpty()) {
             viewModel.importUris(uris)
         }
+    }
+
+    val driveSafPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.importUris(uris, isFromGoogleDrive = true)
+        }
+    }
+
+    val driveImportAuthLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val activity = context.findWorkspaceActivity() ?: return@rememberLauncherForActivityResult
+        viewModel.completeDriveImportAuth(activity, result.data)
     }
 
     LaunchedEffect(state.snackbarMessage) {
@@ -253,21 +298,11 @@ fun NotebookWorkspaceScreen(
                             SourcesTabContent(
                                 state = state,
                                 onAddFilesClick = {
-                                    filePickerLauncher.launch(
-                                        arrayOf(
-                                            "application/pdf",
-                                            "text/plain",
-                                            "text/markdown",
-                                            "text/html",
-                                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                            "application/epub+zip",
-                                            "image/*",
-                                            "audio/*",
-                                            "video/*",
-                                            "*/*"
-                                        )
-                                    )
+                                    filePickerLauncher.launch(supportedMimeTypes)
+                                },
+                                onAddGoogleDriveClick = {
+                                    viewModel.clearDriveImportError()
+                                    showGoogleDriveSheet = true
                                 },
                                 onCreateNote = viewModel::createNoteSource,
                                 onImportWebUrl = viewModel::importWebUrl,
@@ -433,4 +468,179 @@ fun NotebookWorkspaceScreen(
             }
         )
     }
+
+    if (showGoogleDriveSheet) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                viewModel.cancelDriveImport()
+                showGoogleDriveSheet = false
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Importar do Google Drive", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = "Importe documentos do seu Drive para este notebook. Isso é independente dos backups privados (appDataFolder).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = {
+                        showGoogleDriveSheet = false
+                        driveSafPickerLauncher.launch(supportedMimeTypes)
+                    },
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("drive_saf_picker_button")
+                ) {
+                    Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Selecionar pelo Seletor do Android")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val activity = context.findWorkspaceActivity() ?: return@OutlinedButton
+                        viewModel.prepareDriveBrowser(activity) { req ->
+                            driveImportAuthLauncher.launch(req)
+                        }
+                    },
+                    enabled = !state.isLoadingDriveFiles && !state.isImportingFromDrive,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("drive_inapp_browser_button")
+                ) {
+                    Icon(Icons.Outlined.CloudDownload, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Navegar no Google Drive (somente leitura)")
+                }
+
+                if (state.isLoadingDriveFiles || state.isImportingFromDrive) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (state.isImportingFromDrive) "Baixando e importando..." else "Carregando arquivos...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = { viewModel.cancelDriveImport() }) {
+                            Text("Cancelar")
+                        }
+                    }
+                }
+
+                if (!state.driveImportError.isNullOrBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = state.driveImportError!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
+                if (state.driveImportFiles.isNotEmpty() || state.driveImportSearchQuery.isNotBlank()) {
+                    OutlinedTextField(
+                        value = state.driveImportSearchQuery,
+                        onValueChange = viewModel::searchDriveImportFiles,
+                        placeholder = { Text("Filtrar arquivos no Google Drive...") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                        trailingIcon = {
+                            if (state.driveImportSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.searchDriveImportFiles("") }) {
+                                    Icon(Icons.Rounded.Close, "Limpar")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(state.driveImportFiles, key = { it.id }) { item ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !state.isImportingFromDrive) {
+                                        viewModel.importDriveDocument(item) {
+                                            showGoogleDriveSheet = false
+                                        }
+                                    }
+                                    .testTag("drive_import_item_${item.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Description,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = item.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        val sizeLabel = if (item.sizeBytes > 0L) {
+                                            FormatUtils.formatBytes(item.sizeBytes)
+                                        } else {
+                                            "Documento Google"
+                                        }
+                                        val dateLabel = if (item.modifiedEpochMs > 0L) {
+                                            FormatUtils.formatDate(item.modifiedEpochMs)
+                                        } else {
+                                            item.mimeType
+                                        }
+                                        Text(
+                                            text = "$sizeLabel • $dateLabel",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findWorkspaceActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findWorkspaceActivity()
+    else -> null
 }

@@ -243,12 +243,15 @@ class DriveSyncEngine(
             },
             onFailure = { err ->
                 val isCancelled = err is CancellationException
+                val isAuthFailure = err is DriveAuthException || (err is DriveHttpException && err.code == 401)
                 if (isCancelled) {
                     runCatching { stagingFile.delete() }
                     pendingBackupUploadFile = null
                     pendingBackupUploadName = null
                     pendingBackupSessionUri = null
-                } else if (scheduleRetryOnNetworkError && err is IOException) {
+                } else if (err is DriveHttpException && err.code == 401) {
+                    preferencesStore.markDriveNeedsReauth("Sessão do Google Drive expirada. Reconecte sua conta.")
+                } else if (scheduleRetryOnNetworkError && !isAuthFailure && err is IOException) {
                     DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_BACKUP)
                 }
                 val msg = if (isCancelled) "Backup cancelado." else (err.message ?: "Falha ao enviar backup.")
@@ -903,11 +906,17 @@ class DriveSyncEngine(
                     Result.success(res)
                 },
                 onFailure = { err ->
-                    if (scheduleRetryOnNetworkError && err is IOException) {
+                    val isAuthFailure = err is DriveAuthException || (err is DriveHttpException && err.code == 401)
+                    if (err is DriveHttpException && err.code == 401) {
+                        preferencesStore.markDriveNeedsReauth("Autorização do Google Drive expirada ou revogada. Reconecte sua conta.")
+                    } else if (scheduleRetryOnNetworkError && !isAuthFailure && err is IOException) {
                         DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_SYNC)
                     }
                     val msg = err.message ?: "Falha na sincronização com o Google Drive."
-                    preferencesStore.updateDriveSyncTelemetry(status = "Falha na sync", error = msg)
+                    preferencesStore.updateDriveSyncTelemetry(
+                        status = if (isAuthFailure) "Reautorização Google necessária" else "Falha na sync",
+                        error = msg
+                    )
                     _runtimeState.value = _runtimeState.value.copy(
                         isBusy = false,
                         activeOperationLabel = "",
@@ -1432,24 +1441,46 @@ class DriveSyncWorker(
                 periodic
             )
         }
+        internal fun evaluatePrecondition(settings: com.sjos.folionote.core.preferences.AppSettings): Result? = when {
+            !settings.isGoogleDriveConnected -> Result.success()
+            settings.driveNeedsReauth -> Result.failure()
+            else -> null
+        }
+
+        internal suspend fun executeDriveWork(
+            syncEngine: DriveSyncEngine,
+            mode: String
+        ): kotlin.Result<*> = when (mode) {
+            MODE_BACKUP -> syncEngine.createAndUploadBackup(scheduleRetryOnNetworkError = false)
+            else -> syncEngine.syncNow(scheduleRetryOnNetworkError = false)
+        }
+
+        internal fun classifyWorkResult(outcome: kotlin.Result<*>, attemptCount: Int): Result {
+            return outcome.fold(
+                onSuccess = { Result.success() },
+                onFailure = { err ->
+                    when {
+                        err is DriveAuthException -> Result.failure()
+                        err is DriveHttpException && err.code == 401 -> Result.failure()
+                        err is IOException && attemptCount < 4 -> Result.retry()
+                        else -> Result.failure()
+                    }
+                }
+            )
+        }
     }
 
     override suspend fun doWork(): Result {
         val app = applicationContext as? FolioNoteApp ?: return Result.failure()
         val settings = app.container.preferencesStore.settingsFlow.first()
-        if (!settings.isGoogleDriveConnected) return Result.success()
+        evaluatePrecondition(settings)?.let { return it }
 
         val mode = inputData.getString(KEY_MODE) ?: MODE_SYNC
-        val outcome = when (mode) {
-            MODE_BACKUP -> app.container.driveSyncEngine.createAndUploadBackup(scheduleRetryOnNetworkError = false)
-            else -> app.container.driveSyncEngine.syncNow(scheduleRetryOnNetworkError = false)
-        }
-
-        return outcome.fold(
-            onSuccess = { Result.success() },
-            onFailure = { err ->
-                if (err is IOException && runAttemptCount < 4) Result.retry() else Result.failure()
-            }
+        val outcome = executeDriveWork(
+            syncEngine = app.container.driveSyncEngine,
+            mode = mode
         )
+
+        return classifyWorkResult(outcome, runAttemptCount)
     }
 }

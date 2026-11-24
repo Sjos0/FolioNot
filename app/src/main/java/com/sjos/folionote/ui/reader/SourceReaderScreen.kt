@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.outlined.CloudQueue
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.Close
@@ -342,6 +343,64 @@ fun SourceReaderScreen(
                                     }
                                     if (detectedLanguage.isNotBlank()) {
                                         Text("Idioma transcrito: $detectedLanguage", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Google Drive origin metadata card
+                    if (src != null && metaJson.optString("origin") == "google_drive") {
+                        val driveFileId = metaJson.optString("drive_file_id")
+                        val driveMimeType = metaJson.optString("drive_mime_type")
+                        val driveWebLink = metaJson.optString("drive_web_view_link")
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Outlined.CloudQueue, null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "Origem: Google Drive",
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                    }
+                                    if (driveMimeType.isNotBlank()) {
+                                        Text(
+                                            text = "Tipo original: $driveMimeType",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (driveFileId.isNotBlank()) {
+                                        Text(
+                                            text = "ID remoto: $driveFileId",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (driveWebLink.isNotBlank()) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(driveWebLink)))
+                                                }
+                                            },
+                                            shape = CircleShape
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Abrir no Google Drive")
+                                        }
                                     }
                                 }
                             }

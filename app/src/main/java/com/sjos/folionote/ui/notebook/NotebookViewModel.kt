@@ -1,6 +1,9 @@
 package com.sjos.folionote.ui.notebook
 
+import android.app.Activity
+import android.content.Intent
 import android.net.Uri
+import androidx.activity.result.IntentSenderRequest
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -18,7 +21,11 @@ import com.sjos.folionote.data.local.ProviderEntity
 import com.sjos.folionote.data.local.SourceEntity
 import com.sjos.folionote.data.local.StudioArtifactEntity
 import com.sjos.folionote.data.repository.ChatRuntimeState
+import com.sjos.folionote.engine.drive.DriveAuthResult
+import com.sjos.folionote.engine.drive.DriveFileItem
+import com.sjos.folionote.engine.drive.DriveHttpException
 import com.sjos.folionote.engine.retrieval.RetrievedPassage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 enum class NotebookTab(val label: String) {
     SOURCES("Fontes"),
@@ -58,6 +66,11 @@ data class NotebookUiState(
     val lexicalSearchResults: List<RetrievedPassage> = emptyList(),
     val isGeneratingArtifact: Boolean = false,
     val isClippingWebUrl: Boolean = false,
+    val isLoadingDriveFiles: Boolean = false,
+    val isImportingFromDrive: Boolean = false,
+    val driveImportFiles: List<DriveFileItem> = emptyList(),
+    val driveImportSearchQuery: String = "",
+    val driveImportError: String? = null,
     val snackbarMessage: String? = null
 )
 
@@ -79,9 +92,21 @@ class NotebookViewModel(
     private val lexicalSearchResults = MutableStateFlow<List<RetrievedPassage>>(emptyList())
     private val isGeneratingArtifact = MutableStateFlow(false)
     private val isClippingWebUrl = MutableStateFlow(false)
+    private val driveImportState = MutableStateFlow(DriveImportUiState())
     private val snackbarMessage = MutableStateFlow<String?>(null)
 
     private var activeGenerationJob: Job? = null
+    private var driveImportJob: Job? = null
+    private var driveImportAccessToken: String? = null
+    private val driveImportCancelled = AtomicBoolean(false)
+
+    private data class DriveImportUiState(
+        val isLoading: Boolean = false,
+        val isImporting: Boolean = false,
+        val files: List<DriveFileItem> = emptyList(),
+        val searchQuery: String = "",
+        val error: String? = null
+    )
 
     init {
         viewModelScope.launch {
@@ -153,6 +178,7 @@ class NotebookViewModel(
         manualSelectedModelId,
         isGeneratingArtifact,
         isClippingWebUrl,
+        driveImportState,
         snackbarMessage
     ) { arr ->
         ControlsData(
@@ -162,7 +188,8 @@ class NotebookViewModel(
             modelId = arr[3] as String?,
             genArtifact = arr[4] as Boolean,
             clippingWeb = arr[5] as Boolean,
-            snack = arr[6] as String?
+            driveImport = arr[6] as DriveImportUiState,
+            snack = arr[7] as String?
         )
     }
 
@@ -173,6 +200,7 @@ class NotebookViewModel(
         val modelId: String?,
         val genArtifact: Boolean,
         val clippingWeb: Boolean,
+        val driveImport: DriveImportUiState,
         val snack: String?
     )
 
@@ -275,6 +303,11 @@ class NotebookViewModel(
             lexicalSearchResults = lexRes,
             isGeneratingArtifact = ctrl.genArtifact,
             isClippingWebUrl = ctrl.clippingWeb,
+            isLoadingDriveFiles = ctrl.driveImport.isLoading,
+            isImportingFromDrive = ctrl.driveImport.isImporting,
+            driveImportFiles = ctrl.driveImport.files,
+            driveImportSearchQuery = ctrl.driveImport.searchQuery,
+            driveImportError = ctrl.driveImport.error,
             snackbarMessage = ctrl.snack
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NotebookUiState())
@@ -295,12 +328,18 @@ class NotebookViewModel(
         viewModelScope.launch { prefsStore.acknowledgeExternalDisclosure() }
     }
 
-    fun importUris(uris: List<Uri>) {
+    fun importUris(uris: List<Uri>, isFromGoogleDrive: Boolean = false) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
             var imported = 0
             for (uri in uris) {
-                runCatching { notebookRepo.importUriSource(notebookId, uri) }
+                runCatching {
+                    notebookRepo.importUriSource(
+                        notebookId = notebookId,
+                        uri = uri,
+                        isFromGoogleDrive = isFromGoogleDrive
+                    )
+                }
                     .onSuccess { imported++ }
                     .onFailure { snackbarMessage.value = "Erro ao importar arquivo: ${it.message}" }
             }
@@ -308,6 +347,171 @@ class NotebookViewModel(
                 snackbarMessage.value = "$imported fonte(s) importada(s) e colocada(s) na fila de processamento."
             }
         }
+    }
+
+    fun prepareDriveBrowser(
+        activity: Activity,
+        onNeedsResolution: (IntentSenderRequest) -> Unit
+    ) {
+        driveImportJob?.cancel()
+        driveImportJob = viewModelScope.launch {
+            driveImportState.value = driveImportState.value.copy(isLoading = true, error = null)
+            when (val res = container.googleDriveAuthManager.authorizeDriveFileImport(activity)) {
+                is DriveAuthResult.Authorized -> {
+                    driveImportAccessToken = res.accessToken
+                    loadDriveFilesInternal(res.accessToken, driveImportState.value.searchQuery)
+                }
+                is DriveAuthResult.NeedsResolution -> {
+                    driveImportState.value = driveImportState.value.copy(isLoading = false)
+                    onNeedsResolution(res.intentSenderRequest)
+                }
+                DriveAuthResult.Cancelled -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = "Autorização de leitura do Google Drive cancelada."
+                    )
+                }
+                is DriveAuthResult.NetworkError -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = "Sem conexão com a internet para listar arquivos do Google Drive."
+                    )
+                }
+                is DriveAuthResult.Unavailable -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = res.reason
+                    )
+                }
+                is DriveAuthResult.Failed -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = res.message
+                    )
+                }
+            }
+        }
+    }
+
+    fun completeDriveImportAuth(activity: Activity, data: Intent?) {
+        driveImportJob?.cancel()
+        driveImportJob = viewModelScope.launch {
+            when (val res = container.googleDriveAuthManager.extractDriveImportAuthorizationResult(activity, data)) {
+                is DriveAuthResult.Authorized -> {
+                    driveImportAccessToken = res.accessToken
+                    loadDriveFilesInternal(res.accessToken, driveImportState.value.searchQuery)
+                }
+                DriveAuthResult.Cancelled -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = "Autorização de leitura do Google Drive cancelada."
+                    )
+                }
+                is DriveAuthResult.NetworkError -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = "Erro de rede ao autorizar Google Drive."
+                    )
+                }
+                is DriveAuthResult.Unavailable -> {
+                    driveImportState.value = driveImportState.value.copy(isLoading = false, error = res.reason)
+                }
+                is DriveAuthResult.Failed -> {
+                    driveImportState.value = driveImportState.value.copy(isLoading = false, error = res.message)
+                }
+                is DriveAuthResult.NeedsResolution -> {
+                    driveImportState.value = driveImportState.value.copy(
+                        isLoading = false,
+                        error = "Consentimento adicional necessário para ler arquivos do Drive."
+                    )
+                }
+            }
+        }
+    }
+
+    fun searchDriveImportFiles(query: String) {
+        driveImportState.value = driveImportState.value.copy(searchQuery = query)
+        val token = driveImportAccessToken ?: return
+        driveImportJob?.cancel()
+        driveImportJob = viewModelScope.launch {
+            loadDriveFilesInternal(token, query)
+        }
+    }
+
+    private suspend fun loadDriveFilesInternal(token: String, query: String) {
+        driveImportState.value = driveImportState.value.copy(isLoading = true, error = null)
+        val res = container.googleDriveApiClient.listUserDriveFiles(
+            accessToken = token,
+            nameQuery = query.takeIf { it.isNotBlank() }
+        )
+        res.onSuccess { items ->
+            driveImportState.value = driveImportState.value.copy(
+                isLoading = false,
+                files = items,
+                error = null
+            )
+        }.onFailure { err ->
+            if (err is DriveHttpException && (err.code == 401 || err.code == 403)) {
+                driveImportAccessToken = null
+            }
+            driveImportState.value = driveImportState.value.copy(
+                isLoading = false,
+                error = err.message ?: "Falha ao listar documentos no Google Drive."
+            )
+        }
+    }
+
+    fun importDriveDocument(item: DriveFileItem, onImported: () -> Unit = {}) {
+        val token = driveImportAccessToken
+        if (token.isNullOrBlank()) {
+            driveImportState.value = driveImportState.value.copy(
+                error = "Autorize novamente a leitura do Google Drive para importar."
+            )
+            return
+        }
+        driveImportCancelled.set(false)
+        driveImportJob?.cancel()
+        driveImportJob = viewModelScope.launch {
+            driveImportState.value = driveImportState.value.copy(isImporting = true, error = null)
+            val res = notebookRepo.importDriveFile(
+                notebookId = notebookId,
+                accessToken = token,
+                item = item,
+                apiClient = container.googleDriveApiClient,
+                isCancelled = { driveImportCancelled.get() }
+            )
+            res.onSuccess { src ->
+                driveImportState.value = driveImportState.value.copy(isImporting = false, error = null)
+                snackbarMessage.value = "'${src.name}' importado do Google Drive e na fila de indexação."
+                onImported()
+            }.onFailure { err ->
+                if (err is DriveHttpException && (err.code == 401 || err.code == 403)) {
+                    driveImportAccessToken = null
+                }
+                val msg = if (err is CancellationException) {
+                    "Importação do Google Drive cancelada."
+                } else {
+                    err.message ?: "Falha ao baixar documento do Google Drive."
+                }
+                driveImportState.value = driveImportState.value.copy(
+                    isImporting = false,
+                    error = msg
+                )
+            }
+        }
+    }
+
+    fun cancelDriveImport() {
+        driveImportCancelled.set(true)
+        driveImportJob?.cancel()
+        driveImportState.value = driveImportState.value.copy(
+            isLoading = false,
+            isImporting = false
+        )
+    }
+
+    fun clearDriveImportError() {
+        driveImportState.value = driveImportState.value.copy(error = null)
     }
 
     fun createNoteSource(title: String, content: String) {

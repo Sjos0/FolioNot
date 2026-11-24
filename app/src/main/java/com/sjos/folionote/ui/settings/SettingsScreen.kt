@@ -106,11 +106,11 @@ fun SettingsScreen(
     val activity = remember(context) { context.findActivity() }
     val settings = state.settings
 
-    val playServicesConsentLauncher = rememberLauncherForActivityResult(
+    val googleConsentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (activity != null) {
-            viewModel.completePlayServicesAuth(activity, result.data)
+            viewModel.completeGoogleConsent(activity, result.data)
         }
     }
 
@@ -148,11 +148,6 @@ fun SettingsScreen(
     var transLanguage by remember(settings.transcriptionLanguage) { mutableStateOf(settings.transcriptionLanguage) }
     var transKeyInput by remember { mutableStateOf("") }
     var transKeyVisible by remember { mutableStateOf(false) }
-
-    // Google OAuth Client ID (optional PKCE fallback)
-    var driveClientIdInput by remember(settings.driveOAuthClientId) {
-        mutableStateOf(settings.driveOAuthClientId)
-    }
 
     LaunchedEffect(state.statusMessage) {
         val msg = state.statusMessage
@@ -492,6 +487,39 @@ fun SettingsScreen(
                                         }
                                     }
 
+                                    if (settings.driveNeedsReauth) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "A autorização do Google Drive expirou ou foi revogada. Reconecte sua conta para retomar a sincronização.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                                Button(
+                                                    onClick = {
+                                                        if (activity != null) {
+                                                            viewModel.connectGoogleDrive(activity, switchAccount = false) { req ->
+                                                                googleConsentLauncher.launch(req)
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !state.isConnectingGoogle && activity != null,
+                                                    shape = CircleShape,
+                                                    modifier = Modifier.testTag("reconnect_google_drive_button")
+                                                ) {
+                                                    Text("Reconectar Google Drive")
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     state.driveRuntime.lastError?.let { err ->
                                         Surface(
                                             color = MaterialTheme.colorScheme.errorContainer,
@@ -540,33 +568,29 @@ fun SettingsScreen(
                                         OutlinedButton(
                                             onClick = {
                                                 if (activity != null) {
-                                                    viewModel.connectGoogleViaPlayServices(activity) { req ->
-                                                        playServicesConsentLauncher.launch(req)
+                                                    viewModel.connectGoogleDrive(activity, switchAccount = true) { req ->
+                                                        googleConsentLauncher.launch(req)
                                                     }
                                                 }
                                             },
-                                            shape = CircleShape
+                                            enabled = !state.isConnectingGoogle && activity != null,
+                                            shape = CircleShape,
+                                            modifier = Modifier.testTag("switch_google_account_button")
                                         ) {
                                             Text("Trocar conta")
                                         }
-                                        TextButton(onClick = viewModel::disconnectGoogleAccount) {
+                                        TextButton(
+                                            onClick = viewModel::disconnectGoogleAccount,
+                                            modifier = Modifier.testTag("disconnect_google_account_button")
+                                        ) {
                                             Text("Desconectar", color = MaterialTheme.colorScheme.error)
                                         }
                                     }
                                 } else {
                                     Text(
-                                        text = "Conecte sua conta Google dentro do aplicativo para salvar backups em ZIP e sincronizar notebooks no seu Google Drive (AppData). Chaves de API, tokens e senhas nunca são incluídos.",
+                                        text = "Conecte sua conta Google com um toque para salvar backups privados em ZIP e sincronizar notebooks no seu Google Drive (AppData). Chaves de API, tokens e senhas nunca são incluídos.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    OutlinedTextField(
-                                        value = driveClientIdInput,
-                                        onValueChange = { driveClientIdInput = it },
-                                        label = { Text("OAuth Client ID (Android - opcional para PKCE)") },
-                                        placeholder = { Text("123456-abc.apps.googleusercontent.com") },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth()
                                     )
 
                                     FlowRow(
@@ -575,12 +599,9 @@ fun SettingsScreen(
                                     ) {
                                         Button(
                                             onClick = {
-                                                if (driveClientIdInput.trim() != settings.driveOAuthClientId) {
-                                                    viewModel.setDriveOAuthClientId(driveClientIdInput)
-                                                }
                                                 if (activity != null) {
-                                                    viewModel.connectGoogleViaPlayServices(activity) { req ->
-                                                        playServicesConsentLauncher.launch(req)
+                                                    viewModel.connectGoogleDrive(activity, switchAccount = false) { req ->
+                                                        googleConsentLauncher.launch(req)
                                                     }
                                                 }
                                             },
@@ -592,20 +613,7 @@ fun SettingsScreen(
                                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                                 Spacer(Modifier.width(6.dp))
                                             }
-                                            Text("Conectar conta Google")
-                                        }
-
-                                        if (driveClientIdInput.isNotBlank()) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    viewModel.setDriveOAuthClientId(driveClientIdInput)
-                                                    if (activity != null) viewModel.launchPkceAuth(activity)
-                                                },
-                                                enabled = activity != null,
-                                                shape = CircleShape
-                                            ) {
-                                                Text("OAuth PKCE (Navegador)")
-                                            }
+                                            Text("Conectar Google Drive")
                                         }
 
                                         OutlinedButton(

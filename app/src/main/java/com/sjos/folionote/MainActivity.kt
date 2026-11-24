@@ -9,7 +9,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -30,7 +29,6 @@ import com.sjos.folionote.ui.reader.SourceReaderViewModel
 import com.sjos.folionote.ui.settings.SettingsScreen
 import com.sjos.folionote.ui.settings.SettingsViewModel
 import com.sjos.folionote.ui.theme.FolioNoteTheme
-import kotlinx.coroutines.launch
 
 object FolioRoutes {
     const val HOME = "home"
@@ -50,7 +48,6 @@ object FolioRoutes {
 class MainActivity : ComponentActivity() {
 
     private val pendingSharedUrlState = mutableStateOf<String?>(null)
-    private val navigateToDriveSignal = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,17 +60,9 @@ class MainActivity : ComponentActivity() {
                 .collectAsStateWithLifecycle(initialValue = AppSettings())
 
             val pendingSharedUrl by pendingSharedUrlState
-            val shouldOpenDrive by navigateToDriveSignal
 
             FolioNoteTheme(themePreference = settings.themePreference) {
                 val navController = rememberNavController()
-
-                if (shouldOpenDrive) {
-                    navigateToDriveSignal.value = false
-                    navController.navigate(FolioRoutes.DRIVE_SYNC) {
-                        launchSingleTop = true
-                    }
-                }
 
                 NavHost(
                     navController = navController,
@@ -173,26 +162,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?, appContainer: AppContainer) {
         if (intent == null) return
-        when (intent.action) {
-            Intent.ACTION_SEND -> {
-                if (intent.type?.startsWith("text/") == true) {
-                    val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-                    val url = appContainer.webClipperEngine.extractFirstUrl(sharedText)
-                    if (!url.isNullOrBlank()) {
-                        pendingSharedUrlState.value = url
-                    }
-                }
-            }
-            Intent.ACTION_VIEW -> {
-                val data = intent.data
-                if (data != null && data.scheme == "com.sjos.folionote" && data.host == "oauth2redirect") {
-                    lifecycleScope.launch {
-                        appContainer.googleDriveAuthManager.handleOAuthRedirectUri(data)
-                            .onSuccess {
-                                navigateToDriveSignal.value = true
-                            }
-                    }
-                }
+        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+            val url = appContainer.webClipperEngine.extractFirstUrl(sharedText)
+            if (!url.isNullOrBlank()) {
+                pendingSharedUrlState.value = url
             }
         }
     }
