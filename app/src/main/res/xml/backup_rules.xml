@@ -4,4 +4,5 @@
     <exclude domain="sharedpref" path="." />
     <exclude domain="file" path="datastore" />
     <exclude domain="file" path="notebooks" />
+    <exclude domain="file" path="updates" />
 </full-backup-content>

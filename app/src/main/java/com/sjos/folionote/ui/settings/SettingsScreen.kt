@@ -3,6 +3,8 @@ package com.sjos.folionote.ui.settings
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -190,6 +193,50 @@ fun SettingsScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
+                    // 0. App Updates (GitHub Releases)
+                    item {
+                        SectionTitle("Atualizações do aplicativo")
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Outlined.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "FolioNote ${state.installedVersionLabel}",
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                        Text(
+                                            text = "Verifica novas versões oficiais publicadas no GitHub com validação de integridade e assinatura.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Button(
+                                    onClick = viewModel::checkForUpdates,
+                                    shape = CircleShape,
+                                    modifier = Modifier.testTag("check_updates_button")
+                                ) {
+                                    Icon(Icons.Outlined.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Verificar atualizações")
+                                }
+                            }
+                        }
+                    }
+
                     // 1. Gemini Embedding 2 (Dedicated Key ONLY)
                     item {
                         SectionTitle("Embeddings — Gemini Embedding 2")
@@ -628,9 +675,9 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 3. Decoupled OCR & External Transcription
+                    // 3. Local Offline OCR & Configurable Transcription (Groq Whisper default)
                     item {
-                        SectionTitle("OCR e Transcrição Externa")
+                        SectionTitle("OCR e Transcrição")
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainer,
                             shape = RoundedCornerShape(16.dp),
@@ -646,7 +693,7 @@ fun SettingsScreen(
                                     Text("Motor de OCR (PDF digitalizado e Imagens)", style = MaterialTheme.typography.titleSmall)
                                 }
                                 Text(
-                                    text = "Nenhum modelo local de IA é embutido no app. Configure um endpoint REST de OCR ou mantenha desativado para processamento local apenas de texto nativo.",
+                                    text = "Por padrão, o OCR local (ML Kit) roda totalmente offline no aparelho, sem chave de API, sem assinatura e sem enviar documentos para servidores externos. Provedores em nuvem ficam disponíveis como alternativa opcional.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -656,47 +703,68 @@ fun SettingsScreen(
                                             selected = ocrType == t,
                                             onClick = {
                                                 ocrType = t
-                                                if (ocrEndpoint.isBlank() || OcrProviderType.entries.any { it.defaultEndpoint == ocrEndpoint }) {
+                                                if (t == OcrProviderType.ML_KIT_LOCAL) {
+                                                    ocrEndpoint = ""
+                                                } else if (ocrEndpoint.isBlank() || OcrProviderType.entries.any { it.defaultEndpoint == ocrEndpoint }) {
                                                     ocrEndpoint = t.defaultEndpoint
                                                 }
                                             },
-                                            label = { Text(t.label) }
+                                            label = { Text(t.label) },
+                                            modifier = Modifier.testTag("ocr_provider_${t.name.lowercase()}")
                                         )
                                     }
                                 }
-                                OutlinedTextField(
-                                    value = ocrEndpoint,
-                                    onValueChange = { ocrEndpoint = it },
-                                    label = { Text("Endpoint HTTP do OCR") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                if (ocrType == OcrProviderType.OPENAI_VISION_COMPAT) {
+                                if (ocrType == OcrProviderType.ML_KIT_LOCAL) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "Motor local offline ativo • Reconhecimento de texto no dispositivo sem tráfego de rede e sem necessidade de chave.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.padding(10.dp)
+                                        )
+                                    }
+                                } else {
                                     OutlinedTextField(
-                                        value = ocrModel,
-                                        onValueChange = { ocrModel = it },
-                                        label = { Text("Modelo de visão (ex.: gpt-4o-mini)") },
+                                        value = ocrEndpoint,
+                                        onValueChange = { ocrEndpoint = it },
+                                        label = { Text("Endpoint HTTP do OCR") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    if (ocrType == OcrProviderType.OPENAI_VISION_COMPAT) {
+                                        OutlinedTextField(
+                                            value = ocrModel,
+                                            onValueChange = { ocrModel = it },
+                                            label = { Text("Modelo de visão (ex.: gpt-4o-mini)") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    OutlinedTextField(
+                                        value = ocrKeyInput,
+                                        onValueChange = { ocrKeyInput = it },
+                                        label = {
+                                            val masked = viewModel.getMaskedOcrKey(settings)
+                                            Text(if (masked.isNotBlank()) "Chave API OCR (salva: $masked)" else "Chave API OCR")
+                                        },
+                                        visualTransformation = if (ocrKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { ocrKeyVisible = !ocrKeyVisible }) {
+                                                Icon(if (ocrKeyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave OCR")
+                                            }
+                                        },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
-                                OutlinedTextField(
-                                    value = ocrKeyInput,
-                                    onValueChange = { ocrKeyInput = it },
-                                    label = {
-                                        val masked = viewModel.getMaskedOcrKey(settings)
-                                        Text(if (masked.isNotBlank()) "Chave API OCR (salva: $masked)" else "Chave API OCR")
-                                    },
-                                    visualTransformation = if (ocrKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                    trailingIcon = {
-                                        IconButton(onClick = { ocrKeyVisible = !ocrKeyVisible }) {
-                                            Icon(if (ocrKeyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave OCR")
-                                        }
-                                    },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Button(
                                         onClick = {
                                             viewModel.saveOcrConfig(
@@ -708,7 +776,8 @@ fun SettingsScreen(
                                             )
                                             ocrKeyInput = ""
                                         },
-                                        shape = CircleShape
+                                        shape = CircleShape,
+                                        modifier = Modifier.testTag("save_ocr_config_button")
                                     ) {
                                         Text("Salvar OCR")
                                     }
@@ -724,7 +793,7 @@ fun SettingsScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.secondary)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Transcrição Externa (Áudio e Vídeo)", style = MaterialTheme.typography.titleSmall)
+                                    Text("Transcrição de Áudio e Vídeo", style = MaterialTheme.typography.titleSmall)
                                 }
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TranscriptionProviderType.entries.forEach { t ->
@@ -735,9 +804,66 @@ fun SettingsScreen(
                                                 if (transEndpoint.isBlank() || TranscriptionProviderType.entries.any { it.defaultEndpoint == transEndpoint }) {
                                                     transEndpoint = t.defaultEndpoint
                                                 }
+                                                if (t == TranscriptionProviderType.GROQ_WHISPER) {
+                                                    if (transModel.isBlank() || transModel == "whisper-1") {
+                                                        transModel = "whisper-large-v3-turbo"
+                                                    }
+                                                } else if (t == TranscriptionProviderType.OPENAI_AUDIO_COMPAT) {
+                                                    if (transModel.isBlank() || transModel.startsWith("whisper-large-v3")) {
+                                                        transModel = "whisper-1"
+                                                    }
+                                                }
                                             },
-                                            label = { Text(t.label) }
+                                            label = { Text(t.label) },
+                                            modifier = Modifier.testTag("trans_provider_${t.name.lowercase()}")
                                         )
+                                    }
+                                }
+                                if (transType == TranscriptionProviderType.GROQ_WHISPER) {
+                                    Text("Modelo Groq Whisper", style = MaterialTheme.typography.labelMedium)
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf(
+                                            "whisper-large-v3-turbo" to "whisper-large-v3-turbo (Rápido)",
+                                            "whisper-large-v3" to "whisper-large-v3 (Precisão)"
+                                        ).forEach { (modelId, label) ->
+                                            FilterChip(
+                                                selected = transModel == modelId,
+                                                onClick = { transModel = modelId },
+                                                label = { Text(label) },
+                                                modifier = Modifier.testTag("groq_model_$modelId")
+                                            )
+                                        }
+                                    }
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Requer sua própria chave gratuita da Groq (não embutida no app). O plano gratuito possui cotas e limites de taxa (não é ilimitado nem permanente), com limite de 25 MB por envio e segmentação automática para mídias longas (<10 min). O áudio é enviado aos servidores da Groq apenas quando você solicita a transcrição.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            OutlinedButton(
+                                                onClick = {
+                                                    runCatching {
+                                                        context.startActivity(
+                                                            Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))
+                                                        )
+                                                    }
+                                                },
+                                                shape = CircleShape,
+                                                modifier = Modifier.testTag("groq_get_key_button")
+                                            ) {
+                                                Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Obter chave na Groq")
+                                            }
+                                        }
                                     }
                                 }
                                 OutlinedTextField(
@@ -768,7 +894,13 @@ fun SettingsScreen(
                                     onValueChange = { transKeyInput = it },
                                     label = {
                                         val masked = viewModel.getMaskedTranscriptionKey(settings)
-                                        Text(if (masked.isNotBlank()) "Chave API Transcrição (salva: $masked)" else "Chave API Transcrição")
+                                        Text(
+                                            when {
+                                                masked.isNotBlank() -> "Chave API Transcrição (salva: $masked)"
+                                                transType == TranscriptionProviderType.GROQ_WHISPER -> "Chave API Groq (gsk_...)"
+                                                else -> "Chave API Transcrição"
+                                            }
+                                        )
                                     },
                                     visualTransformation = if (transKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                     trailingIcon = {
@@ -777,9 +909,14 @@ fun SettingsScreen(
                                         }
                                     },
                                     singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("transcription_key_input")
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Button(
                                         onClick = {
                                             viewModel.saveTranscriptionConfig(
@@ -792,7 +929,8 @@ fun SettingsScreen(
                                             )
                                             transKeyInput = ""
                                         },
-                                        shape = CircleShape
+                                        shape = CircleShape,
+                                        modifier = Modifier.testTag("save_transcription_config_button")
                                     ) {
                                         Text("Salvar Transcrição")
                                     }
@@ -939,6 +1077,25 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (state.showUpdateDialog) {
+        AppUpdateDialog(
+            updateState = state.updateState,
+            installedVersionLabel = state.installedVersionLabel,
+            activity = activity,
+            onStartOrResumeDownload = viewModel::startOrResumeUpdateDownload,
+            onCancelDownload = viewModel::cancelUpdateDownload,
+            onRetryCheck = viewModel::checkForUpdates,
+            onOpenInstallPermissionSettings = {
+                activity?.let { viewModel.openInstallPermissionSettings(it) }
+            },
+            onLaunchInstaller = {
+                activity?.let { viewModel.launchUpdateInstaller(it) }
+            },
+            onRefreshAfterExternalReturn = viewModel::refreshUpdateStateAfterExternalReturn,
+            onDismiss = viewModel::dismissUpdateDialog
+        )
     }
 }
 

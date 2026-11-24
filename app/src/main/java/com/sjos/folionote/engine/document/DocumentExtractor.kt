@@ -52,22 +52,26 @@ class DocumentExtractor(
     suspend fun extract(
         file: File,
         sourceType: SourceType,
-        existingMetadata: Map<String, String> = emptyMap()
+        existingMetadata: Map<String, String> = emptyMap(),
+        onProgress: suspend (String) -> Unit = {}
     ): ExtractedDocument {
         return when (sourceType) {
-            SourceType.PDF -> extractPdf(file)
+            SourceType.PDF -> extractPdf(file, onProgress)
             SourceType.DOCX -> extractDocx(file)
             SourceType.PPTX -> extractPptx(file)
             SourceType.EPUB -> extractEpub(file)
-            SourceType.IMAGE -> extractImage(file)
-            SourceType.AUDIO -> extractAudio(file, existingMetadata)
-            SourceType.VIDEO -> extractVideo(file, existingMetadata)
+            SourceType.IMAGE -> extractImage(file, onProgress)
+            SourceType.AUDIO -> extractAudio(file, existingMetadata, onProgress)
+            SourceType.VIDEO -> extractVideo(file, existingMetadata, onProgress)
             SourceType.WEB_PAGE -> extractWebPage(file, existingMetadata)
             SourceType.TXT, SourceType.MARKDOWN, SourceType.NOTE -> extractPlainText(file)
         }
     }
 
-    private suspend fun extractPdf(file: File): ExtractedDocument {
+    private suspend fun extractPdf(
+        file: File,
+        onProgress: suspend (String) -> Unit = {}
+    ): ExtractedDocument {
         PDDocument.load(file).use { doc ->
             val totalPages = doc.numberOfPages.coerceAtLeast(1)
             val stripper = PDFTextStripper().apply {
@@ -83,6 +87,7 @@ class DocumentExtractor(
 
             val totalChars = pages.sumOf { it.text.count { ch -> !ch.isWhitespace() } }
             if (totalChars < 15 && totalPages > 0) {
+                onProgress("Reconhecendo texto das páginas (OCR)...")
                 val ocrRes = ocrEngine.extractTextWithReport(file, SourceType.PDF)
                 if (ocrRes.isSuccess) {
                     val summary = ocrRes.getOrThrow()
@@ -96,16 +101,19 @@ class DocumentExtractor(
                     if (summary.failedPages.isNotEmpty()) {
                         meta["ocr_failed_pages"] = summary.failedPages.keys.sorted().joinToString(",")
                     }
-                    val partialMsg = if (summary.isPartialFailure) {
-                        "OCR parcial: página(s) ${summary.failedPages.keys.sorted().joinToString(", ")} falharam."
-                    } else null
+                    val allBlank = joined.isBlank() && summary.failedPages.isEmpty()
+                    val partialMsg = when {
+                        summary.isPartialFailure -> "OCR parcial: página(s) ${summary.failedPages.keys.sorted().joinToString(", ")} falharam."
+                        allBlank -> "Nenhum texto legível detectado nas páginas (${summary.providerUsed})."
+                        else -> null
+                    }
                     return ExtractedDocument(
                         pages = summary.pages,
                         fullText = joined,
                         requiresOcr = false,
                         metadata = meta,
                         partialError = partialMsg,
-                        statusOverride = if (summary.isPartialFailure) SourceStatus.PARTIAL else null
+                        statusOverride = if (summary.isPartialFailure || allBlank) SourceStatus.PARTIAL else null
                     )
                 }
                 val errMsg = ocrRes.exceptionOrNull()?.message ?: "OCR necessário para este PDF digitalizado."
@@ -468,7 +476,11 @@ class DocumentExtractor(
         )
     }
 
-    private suspend fun extractImage(file: File): ExtractedDocument {
+    private suspend fun extractImage(
+        file: File,
+        onProgress: suspend (String) -> Unit = {}
+    ): ExtractedDocument {
+        onProgress("Executando OCR na imagem...")
         val ocrRes = ocrEngine.extractTextWithReport(file, SourceType.IMAGE)
         val baseMeta = mutableMapOf("format" to "image", "image_path" to file.absolutePath)
         if (ocrRes.isSuccess) {
@@ -477,15 +489,18 @@ class DocumentExtractor(
             baseMeta["ocr"] = "true"
             baseMeta["ocr_provider"] = summary.providerUsed
             baseMeta["pages"] = "1"
+            val isBlank = text.isBlank()
             return ExtractedDocument(
                 pages = listOf(ExtractedPage(1, text)),
                 fullText = text,
                 requiresOcr = false,
-                metadata = baseMeta
+                metadata = baseMeta,
+                partialError = if (isBlank) "Nenhum texto legível detectado na imagem (${summary.providerUsed})." else null,
+                statusOverride = if (isBlank) SourceStatus.PARTIAL else null
             )
         }
         val errMsg = ocrRes.exceptionOrNull()?.message
-            ?: "Imagem salva localmente. Configure um provedor OCR externo nas Configurações para extrair texto."
+            ?: "Imagem salva localmente. Verifique as opções de OCR nas Configurações para extrair texto."
         baseMeta["ocr_needed"] = "true"
         baseMeta["pages"] = "1"
         return ExtractedDocument(
@@ -499,7 +514,8 @@ class DocumentExtractor(
 
     private suspend fun extractAudio(
         file: File,
-        existingMetadata: Map<String, String>
+        existingMetadata: Map<String, String>,
+        onProgress: suspend (String) -> Unit = {}
     ): ExtractedDocument {
         val info = mediaMetadataReader.readMetadata(file)
         val meta = existingMetadata.toMutableMap().apply {
@@ -512,13 +528,21 @@ class DocumentExtractor(
             put("pages", "1")
         }
 
-        val transRes = transcriptionEngine.transcribe(file, info.mimeType.ifBlank { "audio/mpeg" })
+        val transRes = transcriptionEngine.transcribeWithProgress(
+            mediaFile = file,
+            mimeType = info.mimeType.ifBlank { "audio/mpeg" },
+            metadata = info
+        ) { _, _, label ->
+            onProgress(label)
+        }
         if (transRes.isSuccess) {
             val res = transRes.getOrThrow()
             val formatted = buildTranscriptMarkdown("Áudio", info, res)
             val pages = splitIntoLogicalPages(formatted, 2800).ifEmpty { listOf(formatted) }
                 .mapIndexed { idx, txt -> ExtractedPage(idx + 1, txt) }
             meta["transcribed"] = "true"
+            meta.remove("transcription_partial")
+            meta.remove("transcription_needed")
             meta["pages"] = pages.size.toString()
             res.detectedLanguage?.let { meta["detected_language"] = it }
             return ExtractedDocument(
@@ -529,8 +553,28 @@ class DocumentExtractor(
             )
         }
 
-        val errMsg = transRes.exceptionOrNull()?.message
-            ?: "Áudio armazenado (${info.formattedDuration}). Configure um provedor externo de transcrição para indexar o conteúdo."
+        val err = transRes.exceptionOrNull()
+        if (err is PartialTranscriptionException && err.mergedPartialResult.fullTranscript.isNotBlank()) {
+            val formatted = buildTranscriptMarkdown("Áudio (parcial)", info, err.mergedPartialResult)
+            val pages = splitIntoLogicalPages(formatted, 2800).ifEmpty { listOf(formatted) }
+                .mapIndexed { idx, txt -> ExtractedPage(idx + 1, txt) }
+            meta["transcribed"] = "partial"
+            meta["transcription_partial"] = "true"
+            meta["transcription_failed_chunk"] = err.failedChunkIndex.toString()
+            meta["pages"] = pages.size.toString()
+            return ExtractedDocument(
+                pages = pages,
+                fullText = formatted,
+                requiresOcr = false,
+                requiresTranscription = false,
+                metadata = meta,
+                partialError = err.message,
+                statusOverride = SourceStatus.PARTIAL
+            )
+        }
+
+        val errMsg = err?.message
+            ?: "Áudio armazenado (${info.formattedDuration}). Configure um provedor de transcrição nas Configurações para indexar o conteúdo."
         meta["transcription_needed"] = "true"
         return ExtractedDocument(
             pages = listOf(ExtractedPage(1, "")),
@@ -544,7 +588,8 @@ class DocumentExtractor(
 
     private suspend fun extractVideo(
         file: File,
-        existingMetadata: Map<String, String>
+        existingMetadata: Map<String, String>,
+        onProgress: suspend (String) -> Unit = {}
     ): ExtractedDocument {
         val info = mediaMetadataReader.readMetadata(file)
         val meta = existingMetadata.toMutableMap().apply {
@@ -558,20 +603,48 @@ class DocumentExtractor(
             put("pages", "1")
         }
 
+        if (info.hasAudioTrack == false) {
+            meta["audio_track_extracted"] = "false"
+            return ExtractedDocument(
+                pages = listOf(ExtractedPage(1, "")),
+                fullText = "",
+                requiresOcr = false,
+                requiresTranscription = false,
+                metadata = meta,
+                partialError = "Este vídeo não possui faixa de áudio para transcrever.",
+                statusOverride = SourceStatus.PARTIAL
+            )
+        }
+
         val tempAudio = File.createTempFile("folionote_aud_", ".m4a", file.parentFile)
         return try {
+            onProgress("Extraindo faixa de áudio do vídeo...")
             val extractedAudio = mediaMetadataReader.extractAudioTrack(file, tempAudio)
             val targetForTranscription = if (extractedAudio && tempAudio.length() > 0L) tempAudio else file
             val targetMime = if (extractedAudio && tempAudio.length() > 0L) "audio/mp4" else info.mimeType.ifBlank { "video/mp4" }
             meta["audio_track_extracted"] = extractedAudio.toString()
 
-            val transRes = transcriptionEngine.transcribe(targetForTranscription, targetMime)
+            val transMeta = if (extractedAudio && tempAudio.length() > 0L) {
+                info.copy(mimeType = "audio/mp4")
+            } else {
+                info
+            }
+
+            val transRes = transcriptionEngine.transcribeWithProgress(
+                mediaFile = targetForTranscription,
+                mimeType = targetMime,
+                metadata = transMeta
+            ) { _, _, label ->
+                onProgress(label)
+            }
             if (transRes.isSuccess) {
                 val res = transRes.getOrThrow()
                 val formatted = buildTranscriptMarkdown("Vídeo", info, res)
                 val pages = splitIntoLogicalPages(formatted, 2800).ifEmpty { listOf(formatted) }
                     .mapIndexed { idx, txt -> ExtractedPage(idx + 1, txt) }
                 meta["transcribed"] = "true"
+                meta.remove("transcription_partial")
+                meta.remove("transcription_needed")
                 meta["pages"] = pages.size.toString()
                 res.detectedLanguage?.let { meta["detected_language"] = it }
                 ExtractedDocument(
@@ -581,17 +654,37 @@ class DocumentExtractor(
                     metadata = meta
                 )
             } else {
-                val errMsg = transRes.exceptionOrNull()?.message
-                    ?: "Vídeo armazenado (${info.formattedDuration}). Configure um provedor externo de transcrição para indexar a fala."
-                meta["transcription_needed"] = "true"
-                ExtractedDocument(
-                    pages = listOf(ExtractedPage(1, "")),
-                    fullText = "",
-                    requiresOcr = false,
-                    requiresTranscription = true,
-                    metadata = meta,
-                    partialError = errMsg
-                )
+                val err = transRes.exceptionOrNull()
+                if (err is PartialTranscriptionException && err.mergedPartialResult.fullTranscript.isNotBlank()) {
+                    val formatted = buildTranscriptMarkdown("Vídeo (parcial)", info, err.mergedPartialResult)
+                    val pages = splitIntoLogicalPages(formatted, 2800).ifEmpty { listOf(formatted) }
+                        .mapIndexed { idx, txt -> ExtractedPage(idx + 1, txt) }
+                    meta["transcribed"] = "partial"
+                    meta["transcription_partial"] = "true"
+                    meta["transcription_failed_chunk"] = err.failedChunkIndex.toString()
+                    meta["pages"] = pages.size.toString()
+                    ExtractedDocument(
+                        pages = pages,
+                        fullText = formatted,
+                        requiresOcr = false,
+                        requiresTranscription = false,
+                        metadata = meta,
+                        partialError = err.message,
+                        statusOverride = SourceStatus.PARTIAL
+                    )
+                } else {
+                    val errMsg = err?.message
+                        ?: "Vídeo armazenado (${info.formattedDuration}). Configure um provedor de transcrição nas Configurações para indexar a fala."
+                    meta["transcription_needed"] = "true"
+                    ExtractedDocument(
+                        pages = listOf(ExtractedPage(1, "")),
+                        fullText = "",
+                        requiresOcr = false,
+                        requiresTranscription = true,
+                        metadata = meta,
+                        partialError = errMsg
+                    )
+                }
             }
         } finally {
             runCatching { tempAudio.delete() }

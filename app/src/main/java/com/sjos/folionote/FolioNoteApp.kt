@@ -15,7 +15,9 @@ import com.sjos.folionote.engine.document.ConfigurableExternalOcrEngine
 import com.sjos.folionote.engine.document.DocumentExtractor
 import com.sjos.folionote.engine.document.ExternalAudioTranscriptionEngine
 import com.sjos.folionote.engine.document.FileStorageManager
+import com.sjos.folionote.engine.document.MlKitLocalOcrEngine
 import com.sjos.folionote.engine.document.OcrEngine
+import com.sjos.folionote.engine.document.RoutingOcrEngine
 import com.sjos.folionote.engine.drive.BackupArchiveManager
 import com.sjos.folionote.engine.drive.DriveSyncEngine
 import com.sjos.folionote.engine.drive.GoogleDriveApiClient
@@ -28,6 +30,8 @@ import com.sjos.folionote.engine.indexing.OpenAiCompatibleEmbeddingProvider
 import com.sjos.folionote.engine.indexing.StructuralChunker
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.tools.ToolEngine
+import com.sjos.folionote.engine.updater.AppUpdateManager
+import com.sjos.folionote.engine.updater.GitHubReleaseService
 import com.sjos.folionote.engine.web.WebClipperEngine
 import com.sjos.folionote.engine.worker.SourcePipelineManager
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -61,15 +65,32 @@ class AppContainer(app: Application) {
 
     val fileStorageManager = FileStorageManager(app)
     val webClipperEngine = WebClipperEngine(okHttpClient)
-    val ocrEngine: OcrEngine = ConfigurableExternalOcrEngine(preferencesStore, cryptoManager, okHttpClient)
-    val transcriptionEngine: AudioTranscriptionEngine = ExternalAudioTranscriptionEngine(preferencesStore, cryptoManager, okHttpClient)
+    val mediaMetadataReader = AndroidMediaMetadataReader()
+    private val localOcrEngine = MlKitLocalOcrEngine()
+    private val externalOcrEngine = ConfigurableExternalOcrEngine(preferencesStore, cryptoManager, okHttpClient)
+    val ocrEngine: OcrEngine = RoutingOcrEngine(preferencesStore, localOcrEngine, externalOcrEngine)
+    val transcriptionEngine: AudioTranscriptionEngine = ExternalAudioTranscriptionEngine(
+        preferencesStore = preferencesStore,
+        cryptoManager = cryptoManager,
+        baseHttpClient = okHttpClient,
+        metadataReader = mediaMetadataReader
+    )
     val documentExtractor = DocumentExtractor(
         ocrEngine = ocrEngine,
         transcriptionEngine = transcriptionEngine,
-        mediaMetadataReader = AndroidMediaMetadataReader(),
+        mediaMetadataReader = mediaMetadataReader,
         webClipperEngine = webClipperEngine
     )
     val chunker = StructuralChunker()
+    val gitHubReleaseService = GitHubReleaseService(
+        baseHttpClient = okHttpClient,
+        preferencesStore = preferencesStore
+    )
+    val appUpdateManager = AppUpdateManager(
+        context = app,
+        baseHttpClient = okHttpClient,
+        releaseService = gitHubReleaseService
+    )
 
     private val openAiEmbeddingProvider = OpenAiCompatibleEmbeddingProvider(cryptoManager, okHttpClient)
     private val geminiEmbeddingProvider = GeminiEmbeddingProvider(cryptoManager, okHttpClient)

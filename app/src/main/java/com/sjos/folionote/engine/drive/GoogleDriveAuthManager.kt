@@ -15,6 +15,8 @@ import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Scope
@@ -105,6 +107,14 @@ class CredentialManagerGoogleAuthenticator(
     override suspend fun authenticate(activity: Activity, serverClientId: String): CredentialAuthResult {
         if (serverClientId.isBlank()) {
             return CredentialAuthResult.Unavailable("Web Client ID do desenvolvedor não configurado.")
+        }
+        val playStatus = runCatching {
+            GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(activity)
+        }.getOrDefault(ConnectionResult.SERVICE_MISSING)
+        if (playStatus != ConnectionResult.SUCCESS) {
+            return CredentialAuthResult.Unavailable(
+                "Google Play Services indisponível neste dispositivo. Cadernos, fontes locais e OCR local continuam funcionando normalmente."
+            )
         }
         val credentialManager = CredentialManager.create(activity)
         val nonce = generateNonce()
@@ -202,6 +212,14 @@ class PlayServicesDriveAuthorizationGateway : DriveAuthorizationGateway {
         scopes: List<String>,
         accountEmail: String?
     ): DriveAuthResult {
+        val playStatus = runCatching {
+            GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
+        }.getOrDefault(ConnectionResult.SERVICE_MISSING)
+        if (playStatus != ConnectionResult.SUCCESS) {
+            return DriveAuthResult.Unavailable(
+                "Google Play Services indisponível ou desatualizado neste dispositivo. Os recursos locais do FolioNote continuam disponíveis offline."
+            )
+        }
         return try {
             val builder = AuthorizationRequest.builder()
                 .setRequestedScopes(scopes.map { Scope(it) })

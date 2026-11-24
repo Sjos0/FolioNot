@@ -16,6 +16,8 @@ import com.sjos.folionote.engine.document.StorageStats
 import com.sjos.folionote.engine.drive.DriveSyncRuntimeState
 import com.sjos.folionote.engine.drive.DriveSyncWorker
 import com.sjos.folionote.engine.drive.GoogleConnectOutcome
+import com.sjos.folionote.engine.updater.AvailableReleaseUpdate
+import com.sjos.folionote.engine.updater.UpdateUiState
 import com.sjos.folionote.ui.theme.ThemePreference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,6 +37,9 @@ data class SettingsUiState(
     val isTestingGemini: Boolean = false,
     val geminiValidationResult: Pair<Boolean, String>? = null,
     val isConnectingGoogle: Boolean = false,
+    val updateState: UpdateUiState = UpdateUiState.Idle,
+    val showUpdateDialog: Boolean = false,
+    val installedVersionLabel: String = "",
     val statusMessage: String? = null
 )
 
@@ -47,12 +52,15 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val geminiManager = container.geminiEmbeddingManager
     private val driveAuth = container.googleDriveAuthManager
     private val driveSync = container.driveSyncEngine
+    private val updateManager = container.appUpdateManager
     private val syncDao = container.database.syncDao()
 
     private val isTestingGemini = MutableStateFlow(false)
     private val geminiValidationResult = MutableStateFlow<Pair<Boolean, String>?>(null)
     private val isConnectingGoogle = MutableStateFlow(false)
+    private val showUpdateDialog = MutableStateFlow(false)
     private val statusMessage = MutableStateFlow<String?>(null)
+    private val installedInfo by lazy { updateManager.getInstalledVersionInfo() }
 
     private data class CoreMetaBundle(
         val settings: AppSettings,
@@ -102,11 +110,19 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    private val updateBundleFlow = combine(
+        updateManager.uiState,
+        showUpdateDialog
+    ) { state, showDialog ->
+        state to showDialog
+    }
+
     val uiState: StateFlow<SettingsUiState> = combine(
         coreMetaFlow,
         runtimeFlagsFlow,
+        updateBundleFlow,
         statusMessage
-    ) { core, flags, msg ->
+    ) { core, flags, (updState, dialogOpen), msg ->
         SettingsUiState(
             settings = core.settings,
             storageStats = notebookRepo.getStorageStats(core.usedBytes),
@@ -118,6 +134,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             isTestingGemini = flags.testingGemini,
             geminiValidationResult = flags.geminiValidation,
             isConnectingGoogle = flags.connectingGoogle,
+            updateState = updState,
+            showUpdateDialog = dialogOpen,
+            installedVersionLabel = "v${installedInfo.versionName} (${installedInfo.versionCode})",
             statusMessage = msg
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsUiState())
@@ -206,18 +225,24 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         keepExisting: Boolean
     ) {
         viewModelScope.launch {
+            val isLocal = providerType == OcrProviderType.ML_KIT_LOCAL
             val encrypted = when {
+                isLocal -> null
                 rawKey.isNotBlank() -> cryptoManager.encrypt(rawKey.trim())
                 keepExisting -> null
                 else -> ""
             }
             prefsStore.saveOcrConfig(
                 providerType = providerType,
-                endpointUrl = endpointUrl.ifBlank { providerType.defaultEndpoint },
-                modelId = modelId,
+                endpointUrl = if (isLocal) "" else endpointUrl.ifBlank { providerType.defaultEndpoint },
+                modelId = if (isLocal) "" else modelId,
                 encryptedKey = encrypted
             )
-            statusMessage.value = "Configuração de OCR externo salva."
+            statusMessage.value = if (isLocal) {
+                "OCR local offline (ML Kit) ativado."
+            } else {
+                "Configuração de OCR (${providerType.label}) salva."
+            }
         }
     }
 
@@ -242,6 +267,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         keepExisting: Boolean
     ) {
         viewModelScope.launch {
+            val defaultModel = if (providerType == TranscriptionProviderType.GROQ_WHISPER) {
+                "whisper-large-v3-turbo"
+            } else {
+                "whisper-1"
+            }
             val encrypted = when {
                 rawKey.isNotBlank() -> cryptoManager.encrypt(rawKey.trim())
                 keepExisting -> null
@@ -250,11 +280,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             prefsStore.saveTranscriptionConfig(
                 providerType = providerType,
                 endpointUrl = endpointUrl.ifBlank { providerType.defaultEndpoint },
-                modelId = modelId,
-                language = language,
+                modelId = modelId.ifBlank { defaultModel },
+                language = language.ifBlank { "pt" },
                 encryptedKey = encrypted
             )
-            statusMessage.value = "Configuração de transcrição externa salva."
+            statusMessage.value = "Configuração de transcrição (${providerType.label}) salva."
         }
     }
 
@@ -263,6 +293,45 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             prefsStore.clearTranscriptionKey()
             statusMessage.value = "Chave de API de transcrição removida."
         }
+    }
+
+    fun checkForUpdates() {
+        showUpdateDialog.value = true
+        updateManager.checkForUpdates()
+    }
+
+    fun startOrResumeUpdateDownload(update: AvailableReleaseUpdate) {
+        updateManager.startOrResumeDownload(update)
+    }
+
+    fun cancelUpdateDownload() {
+        updateManager.cancelDownload()
+    }
+
+    fun dismissUpdateDialog() {
+        showUpdateDialog.value = false
+        updateManager.dismissOrResetToIdle()
+    }
+
+    fun openInstallPermissionSettings(activity: Activity) {
+        val intent = updateManager.createUnknownSourcesSettingsIntent()
+        runCatching {
+            activity.startActivity(intent)
+        }.onFailure {
+            statusMessage.value = "Abra as Configurações do Android para permitir a instalação de APKs."
+        }
+    }
+
+    fun launchUpdateInstaller(activity: Activity) {
+        updateManager.launchSystemInstaller(activity).onFailure { err ->
+            if (updateManager.uiState.value !is UpdateUiState.AwaitingInstallPermission) {
+                statusMessage.value = err.message ?: "Não foi possível abrir o instalador do Android."
+            }
+        }
+    }
+
+    fun refreshUpdateStateAfterExternalReturn() {
+        updateManager.refreshStateAfterExternalReturn()
     }
 
     fun connectGoogleDrive(

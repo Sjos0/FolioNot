@@ -18,12 +18,14 @@ import org.json.JSONObject
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "folionote_prefs")
 
 enum class OcrProviderType(val label: String, val defaultEndpoint: String) {
+    ML_KIT_LOCAL("OCR Local no Dispositivo (ML Kit)", ""),
     GOOGLE_CLOUD_VISION("Google Cloud Vision OCR", "https://vision.googleapis.com/v1/images:annotate"),
     OPENAI_VISION_COMPAT("Vision OpenAI-Compat", "https://api.openai.com/v1/chat/completions"),
     CUSTOM_OCR_ENDPOINT("Endpoint OCR Personalizado", "")
 }
 
 enum class TranscriptionProviderType(val label: String, val defaultEndpoint: String) {
+    GROQ_WHISPER("Groq Whisper (Áudio/Vídeo)", "https://api.groq.com/openai/v1/audio/transcriptions"),
     OPENAI_AUDIO_COMPAT("OpenAI Audio / Whisper", "https://api.openai.com/v1/audio/transcriptions"),
     CUSTOM_TRANSCRIPTION_ENDPOINT("Endpoint Transcrição Personalizado", "")
 }
@@ -50,15 +52,15 @@ data class AppSettings(
     val geminiEmbeddingDimensions: Int = 768,
     val geminiEmbeddingEncryptedKey: String = "",
     val geminiEmbeddingLastValidatedAt: Long? = null,
-    // Decoupled External OCR config (no local AI models)
-    val ocrProviderType: OcrProviderType = OcrProviderType.GOOGLE_CLOUD_VISION,
-    val ocrEndpointUrl: String = OcrProviderType.GOOGLE_CLOUD_VISION.defaultEndpoint,
+    // OCR config: offline bundled ML Kit by default; cloud providers optional
+    val ocrProviderType: OcrProviderType = OcrProviderType.ML_KIT_LOCAL,
+    val ocrEndpointUrl: String = OcrProviderType.ML_KIT_LOCAL.defaultEndpoint,
     val ocrModelId: String = "",
     val ocrEncryptedApiKey: String = "",
-    // Decoupled External Audio/Video Transcription config (no local AI models)
-    val transcriptionProviderType: TranscriptionProviderType = TranscriptionProviderType.OPENAI_AUDIO_COMPAT,
-    val transcriptionEndpointUrl: String = TranscriptionProviderType.OPENAI_AUDIO_COMPAT.defaultEndpoint,
-    val transcriptionModelId: String = "whisper-1",
+    // Audio/Video Transcription config: Groq Whisper default for new installs; OpenAI/Custom preserved
+    val transcriptionProviderType: TranscriptionProviderType = TranscriptionProviderType.GROQ_WHISPER,
+    val transcriptionEndpointUrl: String = TranscriptionProviderType.GROQ_WHISPER.defaultEndpoint,
+    val transcriptionModelId: String = "whisper-large-v3-turbo",
     val transcriptionLanguage: String = "pt",
     val transcriptionEncryptedApiKey: String = "",
     // Google Account & Drive Sync/Backup
@@ -82,10 +84,12 @@ data class AppSettings(
         get() = geminiEmbeddingEnabled && geminiEmbeddingEncryptedKey.isNotBlank()
 
     val hasOcrConfigured: Boolean
-        get() = ocrEndpointUrl.isNotBlank() && (ocrEncryptedApiKey.isNotBlank() || ocrProviderType == OcrProviderType.CUSTOM_OCR_ENDPOINT)
+        get() = ocrProviderType == OcrProviderType.ML_KIT_LOCAL ||
+            (ocrEndpointUrl.isNotBlank() && (ocrEncryptedApiKey.isNotBlank() || ocrProviderType == OcrProviderType.CUSTOM_OCR_ENDPOINT))
 
     val hasTranscriptionConfigured: Boolean
-        get() = transcriptionEndpointUrl.isNotBlank() && (transcriptionEncryptedApiKey.isNotBlank() || transcriptionProviderType == TranscriptionProviderType.CUSTOM_TRANSCRIPTION_ENDPOINT)
+        get() = transcriptionEndpointUrl.isNotBlank() &&
+            (transcriptionEncryptedApiKey.isNotBlank() || transcriptionProviderType == TranscriptionProviderType.CUSTOM_TRANSCRIPTION_ENDPOINT)
 
     val isGoogleDriveConnected: Boolean
         get() = !driveAccountEmail.isNullOrBlank() && driveEncryptedAccessToken.isNotBlank()
@@ -131,6 +135,10 @@ class AppPreferencesStore(private val context: Context) {
         val DRIVE_LAST_SYNC_AT = longPreferencesKey("drive_last_sync_at")
         val DRIVE_LAST_SYNC_STATUS = stringPreferencesKey("drive_last_sync_status")
         val DRIVE_LAST_SYNC_ERROR = stringPreferencesKey("drive_last_sync_error")
+
+        val UPDATER_ETAG = stringPreferencesKey("updater_release_etag")
+        val UPDATER_CACHED_JSON = stringPreferencesKey("updater_cached_release_json")
+        val UPDATER_LAST_CHECK_AT = longPreferencesKey("updater_last_check_at")
     }
 
     // Removed legacy OAuth/PKCE preference keys purged during session writes and resets.
@@ -143,12 +151,33 @@ class AppPreferencesStore(private val context: Context) {
         val theme = prefs[Keys.THEME]?.let {
             runCatching { ThemePreference.valueOf(it) }.getOrNull()
         } ?: ThemePreference.DARK
+
+        val hasSavedLegacyOcrConfig = !prefs[Keys.OCR_ENC_KEY].isNullOrBlank() ||
+            !prefs[Keys.OCR_ENDPOINT_URL].isNullOrBlank()
         val ocrType = prefs[Keys.OCR_PROVIDER_TYPE]?.let {
             runCatching { OcrProviderType.valueOf(it) }.getOrNull()
-        } ?: OcrProviderType.GOOGLE_CLOUD_VISION
+        } ?: if (hasSavedLegacyOcrConfig) {
+            OcrProviderType.GOOGLE_CLOUD_VISION
+        } else {
+            OcrProviderType.ML_KIT_LOCAL
+        }
+
+        val hasSavedLegacyTransConfig = !prefs[Keys.TRANS_ENC_KEY].isNullOrBlank() ||
+            !prefs[Keys.TRANS_ENDPOINT_URL].isNullOrBlank()
         val transType = prefs[Keys.TRANS_PROVIDER_TYPE]?.let {
             runCatching { TranscriptionProviderType.valueOf(it) }.getOrNull()
-        } ?: TranscriptionProviderType.OPENAI_AUDIO_COMPAT
+        } ?: if (hasSavedLegacyTransConfig) {
+            TranscriptionProviderType.OPENAI_AUDIO_COMPAT
+        } else {
+            TranscriptionProviderType.GROQ_WHISPER
+        }
+
+        val defaultTransModel = if (transType == TranscriptionProviderType.GROQ_WHISPER) {
+            "whisper-large-v3-turbo"
+        } else {
+            "whisper-1"
+        }
+
         val conflictPolicy = prefs[Keys.DRIVE_CONFLICT_POLICY]?.let {
             runCatching { DriveConflictPolicy.valueOf(it) }.getOrNull()
         } ?: DriveConflictPolicy.ASK_USER
@@ -173,7 +202,7 @@ class AppPreferencesStore(private val context: Context) {
             ocrEncryptedApiKey = prefs[Keys.OCR_ENC_KEY].orEmpty(),
             transcriptionProviderType = transType,
             transcriptionEndpointUrl = prefs[Keys.TRANS_ENDPOINT_URL] ?: transType.defaultEndpoint,
-            transcriptionModelId = prefs[Keys.TRANS_MODEL_ID]?.takeIf { it.isNotBlank() } ?: "whisper-1",
+            transcriptionModelId = prefs[Keys.TRANS_MODEL_ID]?.takeIf { it.isNotBlank() } ?: defaultTransModel,
             transcriptionLanguage = prefs[Keys.TRANS_LANGUAGE]?.takeIf { it.isNotBlank() } ?: "pt",
             transcriptionEncryptedApiKey = prefs[Keys.TRANS_ENC_KEY].orEmpty(),
             driveAccountEmail = prefs[Keys.DRIVE_EMAIL]?.takeIf { it.isNotBlank() },
@@ -278,10 +307,15 @@ class AppPreferencesStore(private val context: Context) {
         language: String,
         encryptedKey: String?
     ) {
+        val defaultModel = if (providerType == TranscriptionProviderType.GROQ_WHISPER) {
+            "whisper-large-v3-turbo"
+        } else {
+            "whisper-1"
+        }
         context.dataStore.edit { prefs ->
             prefs[Keys.TRANS_PROVIDER_TYPE] = providerType.name
             prefs[Keys.TRANS_ENDPOINT_URL] = endpointUrl.trim()
-            prefs[Keys.TRANS_MODEL_ID] = modelId.trim().ifBlank { "whisper-1" }
+            prefs[Keys.TRANS_MODEL_ID] = modelId.trim().ifBlank { defaultModel }
             prefs[Keys.TRANS_LANGUAGE] = language.trim().ifBlank { "pt" }
             if (encryptedKey != null) {
                 if (encryptedKey.isBlank()) prefs.remove(Keys.TRANS_ENC_KEY)
@@ -292,6 +326,29 @@ class AppPreferencesStore(private val context: Context) {
 
     suspend fun clearTranscriptionKey() {
         context.dataStore.edit { it.remove(Keys.TRANS_ENC_KEY) }
+    }
+
+    data class ReleaseCheckCache(
+        val etag: String?,
+        val cachedJson: String?,
+        val lastCheckedAt: Long
+    )
+
+    suspend fun getReleaseCheckCache(): ReleaseCheckCache {
+        val prefs = context.dataStore.data.first()
+        return ReleaseCheckCache(
+            etag = prefs[Keys.UPDATER_ETAG]?.takeIf { it.isNotBlank() },
+            cachedJson = prefs[Keys.UPDATER_CACHED_JSON]?.takeIf { it.isNotBlank() },
+            lastCheckedAt = prefs[Keys.UPDATER_LAST_CHECK_AT] ?: 0L
+        )
+    }
+
+    suspend fun saveReleaseCheckCache(etag: String?, cachedJson: String?, checkedAt: Long) {
+        context.dataStore.edit { prefs ->
+            if (!etag.isNullOrBlank()) prefs[Keys.UPDATER_ETAG] = etag else prefs.remove(Keys.UPDATER_ETAG)
+            if (!cachedJson.isNullOrBlank()) prefs[Keys.UPDATER_CACHED_JSON] = cachedJson
+            prefs[Keys.UPDATER_LAST_CHECK_AT] = checkedAt
+        }
     }
 
     suspend fun saveDriveAccountSession(
@@ -454,5 +511,13 @@ class AppPreferencesStore(private val context: Context) {
                 runCatching { DriveConflictPolicy.valueOf(raw) }.getOrNull()?.let { prefs[Keys.DRIVE_CONFLICT_POLICY] = it.name }
             }
         }
+    }
+
+    internal suspend fun clearAllPrefsForTest() {
+        context.dataStore.edit { it.clear() }
+    }
+
+    internal suspend fun seedLegacyStringPrefForTest(keyName: String, value: String) {
+        context.dataStore.edit { it[stringPreferencesKey(keyName)] = value }
     }
 }

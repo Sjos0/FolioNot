@@ -27,9 +27,12 @@
     <string name="delete">Excluir</string>
     <string name="google_web_oauth_client_id" translatable="false"></string>
     <string name="gemini_embedding_section_title">Embeddings — Gemini Embedding 2</string>
-    <string name="ocr_transcription_section_title">OCR e Transcrição Externa</string>
+    <string name="ocr_transcription_section_title">OCR e Transcrição</string>
     <string name="google_drive_section_title">Conta Google e Google Drive</string>
     <string name="web_clipper_action">Adicionar URL</string>
     <string name="drive_backups_manage">Gerenciar backups e sync</string>
     <string name="import_from_google_drive">Google Drive</string>
+    <string name="app_updates_section_title">Atualizações do aplicativo</string>
+    <string name="check_updates_action">Verificar atualizações</string>
+    <string name="groq_get_key_label">Obter chave na Groq</string>
 </resources>

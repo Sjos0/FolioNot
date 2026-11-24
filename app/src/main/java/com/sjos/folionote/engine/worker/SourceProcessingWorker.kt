@@ -79,12 +79,19 @@ class SourceProcessingWorker(
 
             val sourceType = runCatching { SourceType.valueOf(source.sourceType) }.getOrDefault(SourceType.TXT)
             val existingMeta = parseMetadataMap(source.metadataJson)
-            val extracted = container.documentExtractor.extract(file, sourceType, existingMeta)
+            val extracted = container.documentExtractor.extract(
+                file = file,
+                sourceType = sourceType,
+                existingMetadata = existingMeta,
+                onProgress = { msg ->
+                    jobDao.updateJobProgress(jobId, JobStatus.RUNNING.name, 0.25f, msg)
+                }
+            )
             val mergedMetaJson = JSONObject(extracted.metadata).toString()
 
             if (extracted.requiresOcr) {
                 val ocrMsg = extracted.partialError
-                    ?: "Documento sem texto extraível. Configure um provedor OCR externo nas Configurações para processar."
+                    ?: "Documento sem texto extraível. Verifique o motor de OCR nas Configurações para processar."
                 sourceDao.upsertSource(
                     source.copy(
                         extractedText = "",
@@ -219,10 +226,13 @@ class SourceProcessingWorker(
                 jobId = jobId,
                 status = JobStatus.SUCCEEDED.name,
                 progress = 1f,
-                message = if (finalStatus == SourceStatus.PARTIAL) {
-                    "Parcial • ${chunks.size} trecho(s)"
-                } else {
-                    "Pronto • ${chunks.size} trecho(s)"
+                message = when {
+                    finalStatus == SourceStatus.PARTIAL && chunks.isEmpty() ->
+                        embeddingNotice ?: "Parcial • nenhum conteúdo textual extraível"
+                    finalStatus == SourceStatus.PARTIAL ->
+                        "Parcial • ${chunks.size} trecho(s)"
+                    else ->
+                        "Pronto • ${chunks.size} trecho(s)"
                 }
             )
             db.notebookDao().getNotebookById(source.notebookId)?.let { nb ->

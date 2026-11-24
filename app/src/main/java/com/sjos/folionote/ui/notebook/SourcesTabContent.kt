@@ -178,7 +178,7 @@ fun SourcesTabContent(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "PDFs, DOCX, PPTX, EPUB, páginas Web, Markdown e TXT são extraídos localmente. OCR, transcrição de mídia e Gemini Embedding 2 são opcionais via chaves externas.",
+                                text = "PDFs, DOCX, PPTX, EPUB, páginas Web, Markdown, TXT e OCR local funcionam offline no aparelho. Transcrição de áudio/vídeo e Gemini Embedding 2 usam provedores configuráveis.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
                             )
@@ -429,8 +429,12 @@ private fun SourceRowItem(
                         SourceStatus.CHUNKING -> "Segmentando..."
                         SourceStatus.EMBEDDING -> "Gerando embeddings..."
                         SourceStatus.READY -> "${source.pageCount} $unitLabel • $chunkCount trechos • ${FormatUtils.formatBytes(source.sizeBytes)}"
-                        SourceStatus.PARTIAL -> "Parcial (${source.pageCount} $unitLabel • $chunkCount trechos) — ${source.errorMessage ?: "algumas páginas falharam"}"
-                        SourceStatus.REQUIRES_OCR -> source.errorMessage ?: "Requer OCR externo configurado nas Configurações"
+                        SourceStatus.PARTIAL -> if (chunkCount == 0 && !source.errorMessage.isNullOrBlank()) {
+                            source.errorMessage
+                        } else {
+                            "Parcial (${source.pageCount} $unitLabel • $chunkCount trechos) — ${source.errorMessage ?: "processamento parcial"}"
+                        }
+                        SourceStatus.REQUIRES_OCR -> source.errorMessage ?: "Verifique as opções de OCR nas Configurações"
                         SourceStatus.REQUIRES_TRANSCRIPTION -> source.errorMessage ?: "Requer endpoint de transcrição nas Configurações"
                         SourceStatus.FAILED -> source.errorMessage ?: "Falha ao processar"
                     }
