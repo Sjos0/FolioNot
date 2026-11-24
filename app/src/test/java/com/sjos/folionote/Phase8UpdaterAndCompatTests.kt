@@ -15,10 +15,10 @@ import com.sjos.folionote.data.local.NotebookEntity
 import com.sjos.folionote.engine.document.FileStorageManager
 import com.sjos.folionote.engine.drive.GoogleConnectOutcome
 import com.sjos.folionote.engine.drive.GoogleDriveAuthManager
-import com.sjos.folionote.engine.drive.GoogleSignInGateway
-import com.sjos.folionote.engine.drive.GoogleSignInOutcome
+import com.sjos.folionote.engine.drive.GoogleCredentialAuthenticator
+import com.sjos.folionote.engine.drive.CredentialAuthResult
+import com.sjos.folionote.engine.drive.DriveAuthResult
 import com.sjos.folionote.engine.drive.DriveAuthorizationGateway
-import com.sjos.folionote.engine.drive.DriveAuthorizationOutcome
 import com.sjos.folionote.engine.updater.AndroidApkSignatureVerifier
 import com.sjos.folionote.engine.updater.ApkVerifier
 import com.sjos.folionote.engine.updater.AppUpdateManager
@@ -89,21 +89,29 @@ class Phase8ApiCompatMatrixTests {
     fun `missing Play Services degrades Google Drive auth cleanly while keeping local workspace operational`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
-        val unavailableSignIn = object : GoogleSignInGateway {
-            override suspend fun authenticate(activity: Activity, filterByAuthorizedAccounts: Boolean) =
-                GoogleSignInOutcome.Unavailable("Google Play Services indisponível neste dispositivo.")
+        val unavailableSignIn = object : GoogleCredentialAuthenticator {
+            override suspend fun authenticate(activity: Activity, serverClientId: String) =
+                CredentialAuthResult.Unavailable("Google Play Services indisponível neste dispositivo.")
+
+            override suspend fun clearSession() = Unit
         }
         val unavailableAuth = object : DriveAuthorizationGateway {
-            override suspend fun authorize(activity: Activity, accountEmail: String?, scopes: List<String>) =
-                DriveAuthorizationOutcome.Unavailable("Google Play Services indisponível neste dispositivo.")
+            override suspend fun authorize(context: Context, scopes: List<String>, accountEmail: String?) =
+                DriveAuthResult.Unavailable("Google Play Services indisponível neste dispositivo.")
+
+            override fun extractAuthorizationFromIntent(context: Context, data: android.content.Intent?) =
+                DriveAuthResult.Unavailable("Google Play Services indisponível neste dispositivo.")
+
+            override suspend fun revokeAccess(context: Context, scopes: List<String>, accountEmail: String?) = Unit
         }
         val authManager = GoogleDriveAuthManager(
             context = context,
             preferencesStore = prefs,
             cryptoManager = KeystoreCryptoManager(),
             baseHttpClient = OkHttpClient(),
-            signInGateway = unavailableSignIn,
-            authGateway = unavailableAuth
+            credentialAuthenticator = unavailableSignIn,
+            authorizationGateway = unavailableAuth,
+            serverClientIdProvider = { "test-web-client-id" }
         )
 
         val activity = Robolectric.buildActivity(Activity::class.java).create().get()
