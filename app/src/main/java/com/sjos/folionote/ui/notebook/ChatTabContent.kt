@@ -449,7 +449,7 @@ fun ChatTabContent(
             }
 
             Text(
-                text = "Respostas fundamentadas nas fontes selecionadas (${state.selectedModel?.displayName ?: "sem modelo"}).",
+                text = "${state.chatRuntime.retrievalModeLabel} • ${state.selectedModel?.displayName ?: "sem modelo"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

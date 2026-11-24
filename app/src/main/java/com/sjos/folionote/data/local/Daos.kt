@@ -35,6 +35,12 @@ interface NotebookDao {
     @Query("SELECT * FROM collections ORDER BY name COLLATE NOCASE ASC")
     fun observeAllCollections(): Flow<List<CollectionEntity>>
 
+    @Query("SELECT * FROM collections")
+    suspend fun getAllCollectionsOnce(): List<CollectionEntity>
+
+    @Query("SELECT * FROM notebooks")
+    suspend fun getAllNotebooksOnce(): List<NotebookEntity>
+
     @Upsert
     suspend fun upsertCollection(collection: CollectionEntity)
 
@@ -56,7 +62,7 @@ interface SourceDao {
     @Query("SELECT * FROM sources WHERE id = :sourceId LIMIT 1")
     suspend fun getSourceById(sourceId: String): SourceEntity?
 
-    @Query("SELECT * FROM sources WHERE notebookId = :notebookId AND isSelectedForChat = 1 AND processingStatus = 'READY'")
+    @Query("SELECT * FROM sources WHERE notebookId = :notebookId AND isSelectedForChat = 1 AND processingStatus IN ('READY', 'PARTIAL')")
     suspend fun getSelectedReadySources(notebookId: String): List<SourceEntity>
 
     @Query("SELECT * FROM sources WHERE notebookId = :notebookId")
@@ -91,6 +97,9 @@ interface SourceDao {
 
     @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM sources")
     fun observeTotalStorageBytes(): Flow<Long>
+
+    @Query("SELECT * FROM sources")
+    suspend fun getAllSourcesOnce(): List<SourceEntity>
 }
 
 @Dao
@@ -141,6 +150,12 @@ interface ChunkAndEmbeddingDao {
         embeddingModelId: String,
         dimensions: Int
     )
+
+    @Query("SELECT * FROM document_chunks")
+    suspend fun getAllChunksOnce(): List<DocumentChunkEntity>
+
+    @Query("SELECT * FROM embeddings")
+    suspend fun getAllEmbeddingsOnce(): List<EmbeddingEntity>
 }
 
 @Dao
@@ -244,6 +259,18 @@ interface ConversationAndMessageDao {
     @Query("SELECT * FROM studio_artifacts WHERE notebookId = :notebookId ORDER BY updatedAt DESC")
     fun observeStudioArtifacts(notebookId: String): Flow<List<StudioArtifactEntity>>
 
+    @Query("SELECT * FROM studio_artifacts")
+    suspend fun getAllStudioArtifactsOnce(): List<StudioArtifactEntity>
+
+    @Query("SELECT * FROM conversations")
+    suspend fun getAllConversationsOnce(): List<ConversationEntity>
+
+    @Query("SELECT * FROM messages")
+    suspend fun getAllMessagesOnce(): List<MessageEntity>
+
+    @Query("SELECT * FROM citations")
+    suspend fun getAllCitationsOnce(): List<CitationEntity>
+
     @Upsert
     suspend fun upsertStudioArtifact(artifact: StudioArtifactEntity)
 
@@ -282,4 +309,46 @@ interface ToolAndJobDao {
         message: String,
         now: Long = System.currentTimeMillis()
     )
+}
+
+@Dao
+interface SyncDao {
+    @Query("SELECT * FROM sync_records")
+    suspend fun getAllSyncRecordsOnce(): List<SyncRecordEntity>
+
+    @Query("SELECT * FROM sync_records WHERE recordKey = :recordKey LIMIT 1")
+    suspend fun getSyncRecord(recordKey: String): SyncRecordEntity?
+
+    @Upsert
+    suspend fun upsertSyncRecord(record: SyncRecordEntity)
+
+    @Upsert
+    suspend fun upsertSyncRecords(records: List<SyncRecordEntity>)
+
+    @Query("SELECT * FROM sync_tombstones")
+    suspend fun getAllTombstonesOnce(): List<SyncTombstoneEntity>
+
+    @Query("SELECT * FROM sync_tombstones WHERE syncedToRemote = 0")
+    suspend fun getPendingTombstonesOnce(): List<SyncTombstoneEntity>
+
+    @Upsert
+    suspend fun upsertTombstone(tombstone: SyncTombstoneEntity)
+
+    @Query("DELETE FROM sync_tombstones WHERE id = :id")
+    suspend fun deleteTombstoneById(id: String)
+
+    @Query("SELECT * FROM sync_conflicts WHERE resolutionStatus = 'PENDING' ORDER BY detectedAt DESC")
+    fun observePendingConflicts(): Flow<List<SyncConflictEntity>>
+
+    @Query("SELECT * FROM sync_conflicts WHERE resolutionStatus = 'PENDING' ORDER BY detectedAt DESC")
+    suspend fun getPendingConflictsOnce(): List<SyncConflictEntity>
+
+    @Query("SELECT * FROM sync_conflicts WHERE id = :id LIMIT 1")
+    suspend fun getConflictById(id: String): SyncConflictEntity?
+
+    @Upsert
+    suspend fun upsertConflict(conflict: SyncConflictEntity)
+
+    @Query("UPDATE sync_conflicts SET resolutionStatus = :status WHERE id = :id")
+    suspend fun updateConflictStatus(id: String, status: String)
 }

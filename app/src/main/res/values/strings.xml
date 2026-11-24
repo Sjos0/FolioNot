@@ -25,4 +25,10 @@
     <string name="save">Salvar</string>
     <string name="cancel">Cancelar</string>
     <string name="delete">Excluir</string>
+    <string name="google_drive_oauth_client_id" translatable="false"></string>
+    <string name="gemini_embedding_section_title">Embeddings — Gemini Embedding 2</string>
+    <string name="ocr_transcription_section_title">OCR e Transcrição Externa</string>
+    <string name="google_drive_section_title">Conta Google e Google Drive</string>
+    <string name="web_clipper_action">Adicionar URL</string>
+    <string name="drive_backups_manage">Gerenciar backups e sync</string>
 </resources>

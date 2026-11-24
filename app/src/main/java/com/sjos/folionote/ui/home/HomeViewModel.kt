@@ -49,7 +49,9 @@ data class HomeUiState(
     val providerCount: Int = 0,
     val modelCount: Int = 0,
     val storageStats: StorageStats = StorageStats(0, 0, 0),
-    val settings: AppSettings = AppSettings()
+    val settings: AppSettings = AppSettings(),
+    val isClippingSharedUrl: Boolean = false,
+    val statusMessage: String? = null
 )
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
@@ -64,6 +66,8 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     private val isSearchActive = MutableStateFlow(false)
     private val searchQuery = MutableStateFlow("")
     private val searchResults = MutableStateFlow(GlobalSearchResults())
+    private val isClippingSharedUrl = MutableStateFlow(false)
+    private val statusMessage = MutableStateFlow<String?>(null)
     private var searchJob: Job? = null
 
     private data class CoreCollectionsData(
@@ -108,7 +112,9 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         searchResults,
         providerRepo.allProviders,
         providerRepo.enabledChatModels,
-        prefsStore.settingsFlow
+        prefsStore.settingsFlow,
+        isClippingSharedUrl,
+        statusMessage
     ) { arr ->
         val core = arr[0] as CoreCollectionsData
         val ctrl = arr[1] as ControlsSnapshot
@@ -118,6 +124,8 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         @Suppress("UNCHECKED_CAST")
         val models = arr[4] as List<ModelEntity>
         val settings = arr[5] as AppSettings
+        val clipping = arr[6] as Boolean
+        val statusMsg = arr[7] as String?
 
         val filtered = core.notebooks
             .let { list ->
@@ -156,7 +164,9 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             providerCount = providers.size,
             modelCount = models.size,
             storageStats = notebookRepo.getStorageStats(core.storageBytes),
-            settings = settings
+            settings = settings,
+            isClippingSharedUrl = clipping,
+            statusMessage = statusMsg
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeUiState())
 
@@ -243,6 +253,32 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setThemePreference(theme: ThemePreference) {
         viewModelScope.launch { prefsStore.setThemePreference(theme) }
+    }
+
+    fun clipSharedUrlToNotebook(
+        notebookId: String?,
+        newNotebookTitle: String?,
+        rawUrl: String,
+        onDone: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            isClippingSharedUrl.value = true
+            val targetId = notebookId ?: notebookRepo.createNotebook(
+                title = newNotebookTitle?.trim()?.ifBlank { "Web Clips" } ?: "Web Clips"
+            ).id
+            val res = notebookRepo.importWebUrl(targetId, rawUrl)
+            isClippingSharedUrl.value = false
+            res.onSuccess { src ->
+                statusMessage.value = "Página capturada: ${src.name}"
+                onDone(targetId)
+            }.onFailure { err ->
+                statusMessage.value = err.message ?: "Erro ao capturar URL compartilhada."
+            }
+        }
+    }
+
+    fun clearStatusMessage() {
+        statusMessage.value = null
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

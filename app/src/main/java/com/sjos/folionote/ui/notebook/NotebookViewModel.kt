@@ -57,6 +57,7 @@ data class NotebookUiState(
     val lexicalSearchQuery: String = "",
     val lexicalSearchResults: List<RetrievedPassage> = emptyList(),
     val isGeneratingArtifact: Boolean = false,
+    val isClippingWebUrl: Boolean = false,
     val snackbarMessage: String? = null
 )
 
@@ -77,6 +78,7 @@ class NotebookViewModel(
     private val lexicalSearchQuery = MutableStateFlow("")
     private val lexicalSearchResults = MutableStateFlow<List<RetrievedPassage>>(emptyList())
     private val isGeneratingArtifact = MutableStateFlow(false)
+    private val isClippingWebUrl = MutableStateFlow(false)
     private val snackbarMessage = MutableStateFlow<String?>(null)
 
     private var activeGenerationJob: Job? = null
@@ -150,6 +152,7 @@ class NotebookViewModel(
         activeConversationId,
         manualSelectedModelId,
         isGeneratingArtifact,
+        isClippingWebUrl,
         snackbarMessage
     ) { arr ->
         ControlsData(
@@ -158,7 +161,8 @@ class NotebookViewModel(
             convId = arr[2] as String?,
             modelId = arr[3] as String?,
             genArtifact = arr[4] as Boolean,
-            snack = arr[5] as String?
+            clippingWeb = arr[5] as Boolean,
+            snack = arr[6] as String?
         )
     }
 
@@ -168,6 +172,7 @@ class NotebookViewModel(
         val convId: String?,
         val modelId: String?,
         val genArtifact: Boolean,
+        val clippingWeb: Boolean,
         val snack: String?
     )
 
@@ -199,8 +204,16 @@ class NotebookViewModel(
         val activeProvidersIds = providers.filter { it.isEnabled }.map { it.id }.toSet()
         val usableModels = allModels.filter { it.enabled && !it.isEmbeddingModel && it.providerId in activeProvidersIds }
 
-        val activeEmbModel = settings.activeEmbeddingModelId?.let { id ->
-            allModels.firstOrNull { it.id == id }
+        val activeEmbModel = if (settings.isGeminiEmbeddingActive) {
+            container.geminiEmbeddingManager.buildDedicatedSpec(
+                encryptedKey = settings.geminiEmbeddingEncryptedKey,
+                modelId = settings.geminiEmbeddingModelId,
+                dimensions = settings.geminiEmbeddingDimensions
+            ).model
+        } else {
+            settings.activeEmbeddingModelId?.let { id ->
+                allModels.firstOrNull { it.id == id }
+            }
         }
 
         val incompatibleLabels = if (activeEmbModel != null && srcBundle.embeddings.isNotEmpty()) {
@@ -261,6 +274,7 @@ class NotebookViewModel(
             lexicalSearchQuery = lexQ,
             lexicalSearchResults = lexRes,
             isGeneratingArtifact = ctrl.genArtifact,
+            isClippingWebUrl = ctrl.clippingWeb,
             snackbarMessage = ctrl.snack
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NotebookUiState())
@@ -300,6 +314,20 @@ class NotebookViewModel(
         viewModelScope.launch {
             notebookRepo.createNoteSource(notebookId, title, content)
             snackbarMessage.value = "Nota adicionada às fontes e indexada."
+        }
+    }
+
+    fun importWebUrl(rawUrl: String) {
+        if (rawUrl.isBlank()) return
+        viewModelScope.launch {
+            isClippingWebUrl.value = true
+            val res = notebookRepo.importWebUrl(notebookId, rawUrl)
+            isClippingWebUrl.value = false
+            res.onSuccess { src ->
+                snackbarMessage.value = "Página capturada: ${src.name}"
+            }.onFailure { err ->
+                snackbarMessage.value = err.message ?: "Não foi possível capturar a URL."
+            }
         }
     }
 

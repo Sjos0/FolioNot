@@ -240,7 +240,10 @@ private fun parseInlineFormatting(input: String, baseColor: Color): AnnotatedStr
 }
 
 object FormatUtils {
-    private val dateFormatter = SimpleDateFormat("dd MMM, HH:mm", Locale("pt", "BR"))
+    private val dateFormatter = SimpleDateFormat(
+        "dd MMM, HH:mm",
+        Locale.Builder().setLanguage("pt").setRegion("BR").build()
+    )
 
     fun formatBytes(bytes: Long): String {
         if (bytes < 1024L) return "$bytes B"

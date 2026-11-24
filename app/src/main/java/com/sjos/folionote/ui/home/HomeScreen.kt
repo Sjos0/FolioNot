@@ -79,15 +79,27 @@ import com.sjos.folionote.ui.components.FormatUtils
 import com.sjos.folionote.ui.theme.NotebookIcons
 import com.sjos.folionote.ui.theme.ThemePreference
 
+import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import com.sjos.folionote.ui.settings.GoogleAvatar
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
     onOpenNotebook: (String) -> Unit,
     onOpenProviders: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenDriveSync: () -> Unit = {},
+    pendingSharedUrl: String? = null,
+    onClearSharedUrl: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var showFilterMenu by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
@@ -96,9 +108,18 @@ fun HomeScreen(
     var movingNotebook by remember { mutableStateOf<NotebookEntity?>(null) }
     var showCreateCollectionDialog by remember { mutableStateOf(false) }
 
+    LaunchedEffect(state.statusMessage) {
+        val msg = state.statusMessage
+        if (!msg.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearStatusMessage()
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             if (!state.isSearchActive && state.filterMode != HomeFilterMode.COLLECTIONS) {
                 ExtendedFloatingActionButton(
@@ -146,6 +167,10 @@ fun HomeScreen(
                         showQuickMenu = showQuickMenu,
                         onToggleQuickMenu = { showQuickMenu = !showQuickMenu },
                         currentTheme = state.settings.themePreference,
+                        isDriveConnected = state.settings.isGoogleDriveConnected,
+                        drivePhotoUrl = state.settings.driveAccountPhotoUrl,
+                        driveDisplayName = state.settings.driveAccountName,
+                        driveEmail = state.settings.driveAccountEmail.orEmpty(),
                         onSelectTheme = {
                             viewModel.setThemePreference(it)
                             showQuickMenu = false
@@ -153,6 +178,10 @@ fun HomeScreen(
                         onOpenSettings = {
                             showQuickMenu = false
                             onOpenSettings()
+                        },
+                        onOpenDriveSync = {
+                            showQuickMenu = false
+                            onOpenDriveSync()
                         }
                     )
                 }
@@ -275,6 +304,25 @@ fun HomeScreen(
             }
         )
     }
+
+    if (!pendingSharedUrl.isNullOrBlank()) {
+        ShareWebClipDialog(
+            sharedUrl = pendingSharedUrl,
+            notebooks = state.notebooks,
+            isLoading = state.isClippingSharedUrl,
+            onDismiss = onClearSharedUrl,
+            onConfirm = { targetNotebookId, newNotebookTitle ->
+                viewModel.clipSharedUrlToNotebook(
+                    notebookId = targetNotebookId,
+                    newNotebookTitle = newNotebookTitle,
+                    rawUrl = pendingSharedUrl
+                ) { nbId ->
+                    onClearSharedUrl()
+                    onOpenNotebook(nbId)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -288,8 +336,13 @@ private fun HomeTopBar(
     showQuickMenu: Boolean,
     onToggleQuickMenu: () -> Unit,
     currentTheme: ThemePreference,
+    isDriveConnected: Boolean,
+    drivePhotoUrl: String?,
+    driveDisplayName: String?,
+    driveEmail: String,
     onSelectTheme: (ThemePreference) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenDriveSync: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -368,7 +421,16 @@ private fun HomeTopBar(
                 onClick = onToggleQuickMenu,
                 modifier = Modifier.testTag("home_settings_menu_button")
             ) {
-                Icon(Icons.Outlined.Settings, contentDescription = "Configurações e Tema")
+                if (isDriveConnected) {
+                    GoogleAvatar(
+                        photoUrl = drivePhotoUrl,
+                        displayName = driveDisplayName,
+                        email = driveEmail,
+                        modifier = Modifier.size(28.dp)
+                    )
+                } else {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Configurações e Tema")
+                }
             }
 
             DropdownMenu(
@@ -382,6 +444,11 @@ private fun HomeTopBar(
                         onToggleQuickMenu()
                         onOpenProviders()
                     }
+                )
+                DropdownMenuItem(
+                    text = { Text("Google Drive (Backups e Sync)") },
+                    leadingIcon = { Icon(Icons.Outlined.CloudSync, contentDescription = null) },
+                    onClick = onOpenDriveSync
                 )
                 DropdownMenuItem(
                     text = { Text("Configurações avançadas") },
@@ -1187,6 +1254,102 @@ private fun CreateCollectionDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+@Composable
+private fun ShareWebClipDialog(
+    sharedUrl: String,
+    notebooks: List<NotebookEntity>,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (notebookId: String?, newNotebookTitle: String?) -> Unit
+) {
+    var selectedNotebookId by remember(notebooks) {
+        mutableStateOf(notebooks.firstOrNull()?.id)
+    }
+    var createNew by remember(notebooks) { mutableStateOf(notebooks.isEmpty()) }
+    var newTitle by remember { mutableStateOf("Web Clips") }
+
+    AlertDialog(
+        onDismissRequest = { if (!isLoading) onDismiss() },
+        title = { Text("Salvar link no FolioNote") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = sharedUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (isLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                if (notebooks.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isLoading) { createNew = false },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = !createNew, onClick = { createNew = false })
+                        Text("Notebook existente", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (!createNew) {
+                        LazyColumn(modifier = Modifier.height(140.dp)) {
+                            items(notebooks, key = { it.id }) { nb ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = !isLoading) { selectedNotebookId = nb.id }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = selectedNotebookId == nb.id,
+                                        onClick = { selectedNotebookId = nb.id }
+                                    )
+                                    Text(nb.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !isLoading) { createNew = true },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = createNew, onClick = { createNew = true })
+                    Text("Criar novo notebook", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (createNew) {
+                    OutlinedTextField(
+                        value = newTitle,
+                        onValueChange = { newTitle = it },
+                        label = { Text("Nome do novo notebook") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (createNew) onConfirm(null, newTitle)
+                    else onConfirm(selectedNotebookId, null)
+                },
+                enabled = !isLoading && (createNew || selectedNotebookId != null)
+            ) {
+                Text("Capturar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Cancelar") }
         }
     )
 }

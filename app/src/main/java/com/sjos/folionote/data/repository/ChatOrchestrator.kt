@@ -10,6 +10,7 @@ import com.sjos.folionote.data.local.MessageRole
 import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ProviderEntity
 import com.sjos.folionote.data.local.StudioArtifactEntity
+import com.sjos.folionote.data.local.SyncTombstoneEntity
 import com.sjos.folionote.engine.ai.AiProviderClient
 import com.sjos.folionote.engine.ai.ChatCompletionRequest
 import com.sjos.folionote.engine.ai.ChatMessagePayload
@@ -20,8 +21,10 @@ import com.sjos.folionote.engine.context.ContextBudgetPlanner
 import com.sjos.folionote.engine.context.ContextBudgetReport
 import com.sjos.folionote.engine.context.ContextPlanResult
 import com.sjos.folionote.engine.context.TokenEstimator
+import com.sjos.folionote.engine.drive.DriveSyncEngine
 import com.sjos.folionote.engine.indexing.EmbeddingProvider
 import com.sjos.folionote.engine.indexing.EmbeddingTaskType
+import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.tools.ToolEngine
 import com.sjos.folionote.engine.tools.ToolExecutionOutcome
@@ -52,13 +55,15 @@ data class ChatRuntimeState(
     val activeStatusText: String = "",
     val lastBudgetReport: ContextBudgetReport? = null,
     val pendingToolApproval: PendingToolApproval? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val retrievalModeLabel: String = "Lexical offline (BM25)"
 )
 
 class ChatOrchestrator(
     private val db: FolioNoteDatabase,
     private val aiClient: AiProviderClient,
     private val embeddingProvider: EmbeddingProvider,
+    private val geminiEmbeddingManager: GeminiEmbeddingManager,
     private val retriever: HybridRetriever,
     private val budgetPlanner: ContextBudgetPlanner,
     private val toolEngine: ToolEngine,
@@ -126,6 +131,17 @@ class ChatOrchestrator(
     }
 
     suspend fun deleteConversation(conversationId: String) {
+        val now = System.currentTimeMillis()
+        db.syncDao().upsertTombstone(
+            SyncTombstoneEntity(
+                id = "${DriveSyncEngine.ENTITY_CONVERSATION}:$conversationId",
+                entityType = DriveSyncEngine.ENTITY_CONVERSATION,
+                entityId = conversationId,
+                deletedAt = now,
+                revision = now,
+                syncedToRemote = false
+            )
+        )
         conversationDao.deleteConversationById(conversationId)
     }
 
@@ -327,33 +343,38 @@ class ChatOrchestrator(
             emptyList()
         }
 
-        // Semantic query embedding with RETRIEVAL_QUERY taskType when an active embedding model is selected
+        // Semantic query embedding with RETRIEVAL_QUERY taskType when Gemini Embedding 2 or custom model is active
         var queryEmbedding: FloatArray? = null
         var storedEmbeddings = emptyList<EmbeddingEntity>()
-        val embModelId = settings.activeEmbeddingModelId
-        if (!embModelId.isNullOrBlank() && chunks.isNotEmpty()) {
-            val embModel = providerDao.getModelByInternalId(embModelId)
-            val embProvider = embModel?.let { providerDao.getProviderById(it.providerId) }
-            if (embModel != null && embProvider != null && embModel.enabled && embProvider.isEnabled) {
-                val qRes = embeddingProvider.embedTexts(
-                    provider = embProvider,
-                    model = embModel,
-                    texts = listOf(userQuery),
-                    taskType = EmbeddingTaskType.QUERY
-                )
-                if (qRes.isSuccess) {
-                    val vecResult = qRes.getOrThrow()
-                    queryEmbedding = vecResult.vectors.firstOrNull()
-                    if (vecResult.dimensions > 0) {
-                        storedEmbeddings = chunkDao.getEmbeddingsForSources(
-                            sourceIds = sourceIds,
-                            embeddingModelId = embModel.modelId,
-                            dimensions = vecResult.dimensions
-                        )
+        var retrievalMode = "Lexical offline (BM25)"
+        val activeSpec = geminiEmbeddingManager.resolveActiveEmbeddingSpec(settings, providerDao)
+        if (activeSpec != null && chunks.isNotEmpty()) {
+            val embModel = activeSpec.model
+            val embProvider = activeSpec.provider
+            val qRes = embeddingProvider.embedTexts(
+                provider = embProvider,
+                model = embModel,
+                texts = listOf(userQuery),
+                taskType = EmbeddingTaskType.QUERY
+            )
+            if (qRes.isSuccess) {
+                val vecResult = qRes.getOrThrow()
+                queryEmbedding = vecResult.vectors.firstOrNull()
+                if (vecResult.dimensions > 0) {
+                    storedEmbeddings = chunkDao.getEmbeddingsForSources(
+                        sourceIds = sourceIds,
+                        embeddingModelId = embModel.modelId,
+                        dimensions = vecResult.dimensions
+                    )
+                    retrievalMode = if (storedEmbeddings.isNotEmpty()) {
+                        "Híbrido (Semântico ${embModel.modelId} ${vecResult.dimensions}d + BM25)"
+                    } else {
+                        "Lexical offline (BM25 — reindexe para gerar vetores)"
                     }
                 }
             }
         }
+        _runtimeState.value = _runtimeState.value.copy(retrievalModeLabel = retrievalMode)
 
         val passages = retriever.retrieve(
             query = userQuery,

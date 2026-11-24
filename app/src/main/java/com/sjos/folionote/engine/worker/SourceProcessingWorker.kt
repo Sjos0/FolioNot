@@ -78,15 +78,18 @@ class SourceProcessingWorker(
             }
 
             val sourceType = runCatching { SourceType.valueOf(source.sourceType) }.getOrDefault(SourceType.TXT)
-            val extracted = container.documentExtractor.extract(file, sourceType)
+            val existingMeta = parseMetadataMap(source.metadataJson)
+            val extracted = container.documentExtractor.extract(file, sourceType, existingMeta)
+            val mergedMetaJson = JSONObject(extracted.metadata).toString()
 
             if (extracted.requiresOcr) {
-                val ocrMsg = "PDF sem camada de texto selecionável (requer OCR)."
+                val ocrMsg = extracted.partialError
+                    ?: "Documento sem texto extraível. Configure um provedor OCR externo nas Configurações para processar."
                 sourceDao.upsertSource(
                     source.copy(
                         extractedText = "",
                         pageCount = extracted.pages.size.coerceAtLeast(1),
-                        metadataJson = JSONObject(extracted.metadata).toString(),
+                        metadataJson = mergedMetaJson,
                         processingStatus = SourceStatus.REQUIRES_OCR.name,
                         indexingProgress = 1f,
                         errorMessage = ocrMsg,
@@ -97,14 +100,32 @@ class SourceProcessingWorker(
                 return Result.success()
             }
 
+            if (extracted.requiresTranscription) {
+                val transMsg = extracted.partialError
+                    ?: "Mídia salva localmente. Configure um provedor externo de transcrição para gerar texto indexável."
+                sourceDao.upsertSource(
+                    source.copy(
+                        extractedText = "",
+                        pageCount = extracted.pages.size.coerceAtLeast(1),
+                        metadataJson = mergedMetaJson,
+                        processingStatus = SourceStatus.REQUIRES_TRANSCRIPTION.name,
+                        indexingProgress = 1f,
+                        errorMessage = transMsg,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+                jobDao.updateJobProgress(jobId, JobStatus.FAILED.name, 1f, transMsg)
+                return Result.success()
+            }
+
             sourceDao.upsertSource(
                 source.copy(
                     extractedText = extracted.fullText,
                     pageCount = extracted.pages.size.coerceAtLeast(1),
-                    metadataJson = JSONObject(extracted.metadata).toString(),
+                    metadataJson = mergedMetaJson,
                     processingStatus = SourceStatus.CHUNKING.name,
                     indexingProgress = 0.45f,
-                    errorMessage = null,
+                    errorMessage = extracted.partialError,
                     updatedAt = System.currentTimeMillis()
                 )
             )
@@ -123,67 +144,74 @@ class SourceProcessingWorker(
             chunkDao.deleteChunksForSource(source.id)
             chunkDao.insertChunks(chunks)
 
-            val embeddingModelId = settings.activeEmbeddingModelId
-            var embeddingNotice: String? = null
-            if (!embeddingModelId.isNullOrBlank() && chunks.isNotEmpty()) {
-                val embModel = db.providerAndModelDao().getModelByInternalId(embeddingModelId)
-                val embProvider = embModel?.let { db.providerAndModelDao().getProviderById(it.providerId) }
-                if (embModel != null && embProvider != null && embModel.enabled && embProvider.isEnabled) {
-                    sourceDao.updateProcessingState(sourceId, SourceStatus.EMBEDDING.name, 0.72f)
-                    jobDao.updateJobProgress(jobId, JobStatus.RUNNING.name, 0.72f, "Gerando embeddings...")
+            val activeSpec = container.geminiEmbeddingManager.resolveActiveEmbeddingSpec(
+                settings = settings,
+                providerDao = db.providerAndModelDao()
+            )
+            var embeddingNotice: String? = extracted.partialError
+            if (activeSpec != null && chunks.isNotEmpty()) {
+                val embModel = activeSpec.model
+                val embProvider = activeSpec.provider
+                sourceDao.updateProcessingState(sourceId, SourceStatus.EMBEDDING.name, 0.72f)
+                jobDao.updateJobProgress(
+                    jobId,
+                    JobStatus.RUNNING.name,
+                    0.72f,
+                    "Gerando embeddings (${embModel.displayName})..."
+                )
 
-                    val batchSize = 16
-                    val entities = mutableListOf<EmbeddingEntity>()
-                    var embeddingFailed = false
-                    for (batchStart in chunks.indices step batchSize) {
-                        if (isStopped) break
-                        val batch = chunks.subList(batchStart, (batchStart + batchSize).coerceAtMost(chunks.size))
-                        val res = container.embeddingProvider.embedTexts(
-                            provider = embProvider,
-                            model = embModel,
-                            texts = batch.map { it.content },
-                            taskType = EmbeddingTaskType.DOCUMENT
-                        )
-                        if (res.isSuccess) {
-                            val result = res.getOrThrow()
-                            batch.forEachIndexed { idx, chunk ->
-                                val vec = result.vectors.getOrNull(idx)
-                                if (vec != null && vec.isNotEmpty()) {
-                                    entities.add(
-                                        EmbeddingEntity(
-                                            id = UUID.randomUUID().toString(),
-                                            chunkId = chunk.id,
-                                            notebookId = source.notebookId,
-                                            sourceId = source.id,
-                                            embeddingProviderId = embProvider.id,
-                                            embeddingModelId = embModel.modelId,
-                                            dimensions = result.dimensions,
-                                            vectorBlob = VectorCodec.floatArrayToBytes(vec)
-                                        )
+                val batchSize = 16
+                val entities = mutableListOf<EmbeddingEntity>()
+                var embeddingFailed = false
+                for (batchStart in chunks.indices step batchSize) {
+                    if (isStopped) break
+                    val batch = chunks.subList(batchStart, (batchStart + batchSize).coerceAtMost(chunks.size))
+                    val res = container.embeddingProvider.embedTexts(
+                        provider = embProvider,
+                        model = embModel,
+                        texts = batch.map { it.content },
+                        taskType = EmbeddingTaskType.DOCUMENT
+                    )
+                    if (res.isSuccess) {
+                        val result = res.getOrThrow()
+                        batch.forEachIndexed { idx, chunk ->
+                            val vec = result.vectors.getOrNull(idx)
+                            if (vec != null && vec.isNotEmpty()) {
+                                entities.add(
+                                    EmbeddingEntity(
+                                        id = UUID.randomUUID().toString(),
+                                        chunkId = chunk.id,
+                                        notebookId = source.notebookId,
+                                        sourceId = source.id,
+                                        embeddingProviderId = embProvider.id,
+                                        embeddingModelId = embModel.modelId,
+                                        dimensions = result.dimensions,
+                                        vectorBlob = VectorCodec.floatArrayToBytes(vec)
                                     )
-                                }
+                                )
                             }
-                        } else {
-                            embeddingFailed = true
-                            embeddingNotice = "Indexado lexicalmente (offline). Falha ao gerar embeddings: ${res.exceptionOrNull()?.message}"
-                            break
                         }
+                    } else {
+                        embeddingFailed = true
+                        embeddingNotice = "Indexado lexicalmente (offline). Falha ao gerar embeddings: ${res.exceptionOrNull()?.message}"
+                        break
                     }
-                    if (!embeddingFailed && entities.isNotEmpty()) {
-                        val dims = entities.first().dimensions
-                        chunkDao.deleteIncompatibleEmbeddingsForNotebook(
-                            notebookId = source.notebookId,
-                            embeddingModelId = embModel.modelId,
-                            dimensions = dims
-                        )
-                        chunkDao.insertEmbeddings(entities)
-                    }
+                }
+                if (!embeddingFailed && entities.isNotEmpty()) {
+                    val dims = entities.first().dimensions
+                    chunkDao.deleteIncompatibleEmbeddingsForNotebook(
+                        notebookId = source.notebookId,
+                        embeddingModelId = embModel.modelId,
+                        dimensions = dims
+                    )
+                    chunkDao.insertEmbeddings(entities)
                 }
             }
 
+            val finalStatus = extracted.statusOverride ?: SourceStatus.READY
             sourceDao.updateProcessingState(
                 sourceId = sourceId,
-                status = SourceStatus.READY.name,
+                status = finalStatus.name,
                 progress = 1f,
                 errorMessage = embeddingNotice
             )
@@ -191,7 +219,11 @@ class SourceProcessingWorker(
                 jobId = jobId,
                 status = JobStatus.SUCCEEDED.name,
                 progress = 1f,
-                message = "Pronto • ${chunks.size} trecho(s)"
+                message = if (finalStatus == SourceStatus.PARTIAL) {
+                    "Parcial • ${chunks.size} trecho(s)"
+                } else {
+                    "Pronto • ${chunks.size} trecho(s)"
+                }
             )
             db.notebookDao().getNotebookById(source.notebookId)?.let { nb ->
                 db.notebookDao().upsertNotebook(nb.copy(updatedAt = System.currentTimeMillis()))
@@ -204,6 +236,21 @@ class SourceProcessingWorker(
             jobDao.updateJobProgress(jobId, JobStatus.FAILED.name, 0f, err)
             Result.failure()
         }
+    }
+
+    private fun parseMetadataMap(jsonStr: String): Map<String, String> {
+        if (jsonStr.isBlank()) return emptyMap()
+        return runCatching {
+            val obj = JSONObject(jsonStr)
+            val map = linkedMapOf<String, String>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val v = obj.optString(key, "")
+                if (v.isNotBlank()) map[key] = v
+            }
+            map
+        }.getOrDefault(emptyMap())
     }
 }
 

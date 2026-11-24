@@ -72,6 +72,7 @@ fun NotebookWorkspaceScreen(
     viewModel: NotebookViewModel,
     onBack: () -> Unit,
     onOpenProviders: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenReader: (sourceId: String, page: Int, chunkId: String?) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -182,6 +183,14 @@ fun NotebookWorkspaceScreen(
                                     showBudgetDialog = true
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("Configurações (Embeddings, OCR, Drive)") },
+                                leadingIcon = { Icon(Icons.Outlined.Settings, null) },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onOpenSettings()
+                                }
+                            )
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Excluir histórico de conversa", color = MaterialTheme.colorScheme.error) },
@@ -249,12 +258,19 @@ fun NotebookWorkspaceScreen(
                                             "application/pdf",
                                             "text/plain",
                                             "text/markdown",
+                                            "text/html",
                                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                            "application/epub+zip",
+                                            "image/*",
+                                            "audio/*",
+                                            "video/*",
                                             "*/*"
                                         )
                                     )
                                 },
                                 onCreateNote = viewModel::createNoteSource,
+                                onImportWebUrl = viewModel::importWebUrl,
                                 onSearchChange = viewModel::updateSourceSearch,
                                 onDismissBanner = viewModel::dismissSourcesBanner,
                                 onToggleSelectAll = viewModel::setAllSourcesSelected,

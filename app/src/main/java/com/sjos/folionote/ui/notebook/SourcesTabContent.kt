@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,13 +21,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.StickyNote2
+import androidx.compose.material.icons.outlined.VideoFile
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
@@ -65,14 +74,19 @@ import com.sjos.folionote.ui.components.FormatUtils
 import com.sjos.folionote.ui.theme.AccentAmber
 import com.sjos.folionote.ui.theme.AccentBlue
 import com.sjos.folionote.ui.theme.AccentCoral
+import com.sjos.folionote.ui.theme.AccentCyan
 import com.sjos.folionote.ui.theme.AccentEmerald
+import com.sjos.folionote.ui.theme.AccentPink
+import com.sjos.folionote.ui.theme.AccentPurple
 import com.sjos.folionote.ui.theme.AccentTeal
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SourcesTabContent(
     state: NotebookUiState,
     onAddFilesClick: () -> Unit,
     onCreateNote: (String, String) -> Unit,
+    onImportWebUrl: (String) -> Unit,
     onSearchChange: (String) -> Unit,
     onDismissBanner: () -> Unit,
     onToggleSelectAll: (Boolean) -> Unit,
@@ -83,6 +97,7 @@ fun SourcesTabContent(
     onDeleteSource: (SourceEntity) -> Unit
 ) {
     var showCreateNoteDialog by remember { mutableStateOf(false) }
+    var showWebUrlDialog by remember { mutableStateOf(false) }
 
     val allSelected = state.sources.isNotEmpty() && state.sources.all { it.isSelectedForChat }
 
@@ -117,7 +132,7 @@ fun SourcesTabContent(
                             )
                         }
                         Text(
-                            text = "Este notebook possui vetores gerados por ${state.incompatibleEmbeddingLabels.joinToString(", ")}, diferente do modelo ativo (${state.activeEmbeddingModel.modelId}). Reindexe para migrar sem misturar espaços vetoriais.",
+                            text = "Este notebook possui vetores gerados por ${state.incompatibleEmbeddingLabels.joinToString(", ")}, diferente do modelo ativo (${state.activeEmbeddingModel.modelId} • ${state.activeEmbeddingModel.embeddingDimensions ?: "?"}d). Reindexe para migrar sem misturar espaços vetoriais.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -155,13 +170,13 @@ fun SourcesTabContent(
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Processamento local e independente",
+                                text = "Processamento local e provedores desacoplados",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "PDFs, DOCX, Markdown e TXT são extraídos e indexados no dispositivo. Apenas os trechos relevantes selecionados são enviados ao modelo escolhido.",
+                                text = "PDFs, DOCX, PPTX, EPUB, páginas Web, Markdown e TXT são extraídos localmente. OCR, transcrição de mídia e Gemini Embedding 2 são opcionais via chaves externas.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
                             )
@@ -175,28 +190,27 @@ fun SourcesTabContent(
         }
 
         item {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = onAddFilesClick,
                     shape = CircleShape,
                     modifier = Modifier
-                        .weight(1f)
                         .minimumInteractiveComponentSize()
                         .testTag("add_sources_button")
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Adicionar fontes", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Arquivos", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
                 OutlinedButton(
                     onClick = { showCreateNoteDialog = true },
                     shape = CircleShape,
                     modifier = Modifier
-                        .weight(1f)
                         .minimumInteractiveComponentSize()
                         .testTag("create_note_source_button")
                 ) {
@@ -204,6 +218,25 @@ fun SourcesTabContent(
                     Spacer(Modifier.width(6.dp))
                     Text("Criar nota", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+
+                OutlinedButton(
+                    onClick = { showWebUrlDialog = true },
+                    enabled = !state.isClippingWebUrl,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("add_web_url_button")
+                ) {
+                    Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Adicionar URL", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+
+        if (state.isClippingWebUrl) {
+            item {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
         }
 
@@ -274,7 +307,7 @@ fun SourcesTabContent(
                         Text("Nenhuma fonte importada", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "Importe PDFs com texto, DOCX, Markdown ou TXT, ou crie uma nota diretamente.",
+                            text = "Importe PDFs, DOCX, PPTX, EPUB, imagens, áudio/vídeo, páginas web, Markdown ou crie uma nota local.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -309,6 +342,16 @@ fun SourcesTabContent(
             }
         )
     }
+
+    if (showWebUrlDialog) {
+        WebClipUrlDialog(
+            onDismiss = { showWebUrlDialog = false },
+            onClip = { url ->
+                showWebUrlDialog = false
+                onImportWebUrl(url)
+            }
+        )
+    }
 }
 
 @Composable
@@ -331,6 +374,12 @@ private fun SourceRowItem(
     val (icon, tint) = when (type) {
         SourceType.PDF -> Icons.Outlined.PictureAsPdf to AccentCoral
         SourceType.DOCX -> Icons.Outlined.Description to AccentBlue
+        SourceType.PPTX -> Icons.Outlined.Slideshow to AccentAmber
+        SourceType.EPUB -> Icons.Outlined.MenuBook to AccentPurple
+        SourceType.IMAGE -> Icons.Outlined.Image to AccentPink
+        SourceType.AUDIO -> Icons.Outlined.AudioFile to AccentTeal
+        SourceType.VIDEO -> Icons.Outlined.VideoFile to AccentCyan
+        SourceType.WEB_PAGE -> Icons.Outlined.Language to AccentBlue
         SourceType.MARKDOWN -> Icons.Outlined.Description to AccentTeal
         SourceType.NOTE -> Icons.Outlined.StickyNote2 to AccentAmber
         SourceType.TXT -> Icons.Outlined.Description to AccentEmerald
@@ -355,21 +404,33 @@ private fun SourceRowItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val unitLabel = when (type) {
+                        SourceType.PPTX -> "slides"
+                        SourceType.EPUB -> "cap."
+                        else -> "pág."
+                    }
                     val statusLabel = when (status) {
                         SourceStatus.PENDING -> "Na fila..."
-                        SourceStatus.EXTRACTING -> "Extraindo texto..."
+                        SourceStatus.EXTRACTING -> "Extraindo conteúdo..."
                         SourceStatus.CHUNKING -> "Segmentando..."
                         SourceStatus.EMBEDDING -> "Gerando embeddings..."
-                        SourceStatus.READY -> "${source.pageCount} pág. • $chunkCount trechos • ${FormatUtils.formatBytes(source.sizeBytes)}"
-                        SourceStatus.REQUIRES_OCR -> "PDF digitalizado (OCR previsto para fase futura)"
+                        SourceStatus.READY -> "${source.pageCount} $unitLabel • $chunkCount trechos • ${FormatUtils.formatBytes(source.sizeBytes)}"
+                        SourceStatus.PARTIAL -> "Parcial (${source.pageCount} $unitLabel • $chunkCount trechos) — ${source.errorMessage ?: "algumas páginas falharam"}"
+                        SourceStatus.REQUIRES_OCR -> source.errorMessage ?: "Requer OCR externo configurado nas Configurações"
+                        SourceStatus.REQUIRES_TRANSCRIPTION -> source.errorMessage ?: "Requer endpoint de transcrição nas Configurações"
                         SourceStatus.FAILED -> source.errorMessage ?: "Falha ao processar"
                     }
+                    val isWarning = status == SourceStatus.FAILED ||
+                        status == SourceStatus.REQUIRES_OCR ||
+                        status == SourceStatus.REQUIRES_TRANSCRIPTION ||
+                        status == SourceStatus.PARTIAL
+
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (status == SourceStatus.REQUIRES_OCR || status == SourceStatus.FAILED) {
+                        if (isWarning) {
                             Icon(
                                 Icons.Rounded.WarningAmber,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = if (status == SourceStatus.PARTIAL) AccentAmber else MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(Modifier.width(4.dp))
@@ -377,10 +438,10 @@ private fun SourceRowItem(
                         Text(
                             text = statusLabel,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (status == SourceStatus.FAILED || status == SourceStatus.REQUIRES_OCR) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                            color = when {
+                                status == SourceStatus.PARTIAL -> AccentAmber
+                                isWarning -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -479,6 +540,51 @@ private fun CreateNoteSourceDialog(
                 enabled = content.isNotBlank()
             ) {
                 Text("Salvar fonte")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+@Composable
+private fun WebClipUrlDialog(
+    onDismiss: () -> Unit,
+    onClip: (String) -> Unit
+) {
+    var url by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Capturar página da Web") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Cole a URL do artigo ou página pública. O conteúdo principal será extraído em Markdown e salvo offline.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL (http:// ou https://)") },
+                    placeholder = { Text("https://...") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("web_clip_url_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onClip(url.trim()) },
+                enabled = url.trim().startsWith("http://", ignoreCase = true) ||
+                    url.trim().startsWith("https://", ignoreCase = true),
+                modifier = Modifier.testTag("web_clip_confirm_button")
+            ) {
+                Text("Capturar")
             }
         },
         dismissButton = {

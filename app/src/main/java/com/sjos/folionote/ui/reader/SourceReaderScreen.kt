@@ -1,5 +1,7 @@
 package com.sjos.folionote.ui.reader
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,8 +13,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -22,15 +27,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -43,11 +52,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import com.sjos.folionote.data.local.SourceStatus
+import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.ui.components.FormatUtils
 import com.sjos.folionote.ui.theme.JetBrainsMonoFontFamily
+import org.json.JSONObject
+import java.io.File
 
 @Composable
 fun SourceReaderScreen(
@@ -55,9 +72,20 @@ fun SourceReaderScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var showMetadata by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    val sourceType = remember(state.source?.sourceType) {
+        state.source?.sourceType?.let { runCatching { SourceType.valueOf(it) }.getOrNull() }
+    }
+    val sourceStatus = remember(state.source?.processingStatus) {
+        state.source?.processingStatus?.let { runCatching { SourceStatus.valueOf(it) }.getOrNull() }
+    }
+    val metaJson = remember(state.source?.metadataJson) {
+        runCatching { JSONObject(state.source?.metadataJson ?: "{}") }.getOrNull() ?: JSONObject()
+    }
 
     val availablePages = remember(state.chunks, state.source) {
         val pages = state.chunks.map { it.pageNumber }.distinct().sorted()
@@ -81,6 +109,12 @@ fun SourceReaderScreen(
             val idx = visibleChunks.indexOfFirst { it.id == hlId }
             if (idx >= 0) listState.animateScrollToItem(idx)
         }
+    }
+
+    val unitPrefix = when (sourceType) {
+        SourceType.PPTX -> "Slide"
+        SourceType.EPUB -> "Cap."
+        else -> "Pág."
     }
 
     Scaffold(
@@ -157,7 +191,7 @@ fun SourceReaderScreen(
                             FilterChip(
                                 selected = state.selectedPage == page,
                                 onClick = { viewModel.selectPage(page) },
-                                label = { Text("Pág. $page") },
+                                label = { Text("$unitPrefix $page") },
                                 shape = CircleShape
                             )
                         }
@@ -170,6 +204,150 @@ fun SourceReaderScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    val src = state.source
+
+                    // Status notice for partial / OCR / transcription states
+                    if (src != null && (sourceStatus == SourceStatus.PARTIAL ||
+                            sourceStatus == SourceStatus.REQUIRES_OCR ||
+                            sourceStatus == SourceStatus.REQUIRES_TRANSCRIPTION) &&
+                        !src.errorMessage.isNullOrBlank()
+                    ) {
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = src.errorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Image Preview for IMAGE sources
+                    if (src != null && sourceType == SourceType.IMAGE && src.filePath.isNotBlank()) {
+                        val imgFile = File(src.filePath)
+                        if (imgFile.exists()) {
+                            item {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    AsyncImage(
+                                        model = imgFile,
+                                        contentDescription = "Pré-visualização de ${src.name}",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 360.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Web Clipper metadata header for WEB_PAGE sources
+                    if (src != null && sourceType == SourceType.WEB_PAGE) {
+                        val canonicalUrl = metaJson.optString("canonical_url")
+                            .ifBlank { metaJson.optString("source_url") }
+                        val domain = metaJson.optString("domain")
+                        val capturedAt = metaJson.optString("captured_at").toLongOrNull() ?: src.importedAt
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Outlined.Language, null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = domain.ifBlank { "Página Web capturada" },
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                    }
+                                    if (canonicalUrl.isNotBlank()) {
+                                        Text(
+                                            text = canonicalUrl,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = "Capturado em: ${FormatUtils.formatDate(capturedAt)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (canonicalUrl.isNotBlank()) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(canonicalUrl)))
+                                                }
+                                            },
+                                            shape = CircleShape
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Abrir URL externa")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Audio / Video metadata header
+                    if (src != null && (sourceType == SourceType.AUDIO || sourceType == SourceType.VIDEO)) {
+                        val durationFormatted = metaJson.optString("duration_formatted")
+                        val resolution = metaJson.optString("resolution")
+                        val detectedLanguage = metaJson.optString("detected_language")
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (sourceType == SourceType.VIDEO) "Metadados do Vídeo" else "Metadados do Áudio",
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    if (durationFormatted.isNotBlank()) {
+                                        Text("Duração: $durationFormatted", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (resolution.isNotBlank()) {
+                                        Text("Resolução: $resolution", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (detectedLanguage.isNotBlank()) {
+                                        Text("Idioma transcrito: $detectedLanguage", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (visibleChunks.isEmpty()) {
                         val fallbackText = state.source?.extractedText.orEmpty()
                         item {
@@ -196,7 +374,7 @@ fun SourceReaderScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             text = buildString {
-                                                append("Página ${chunk.pageNumber} • Trecho #${chunk.chunkIndex + 1}")
+                                                append("$unitPrefix ${chunk.pageNumber} • Trecho #${chunk.chunkIndex + 1}")
                                                 if (chunk.sectionTitle.isNotBlank()) append(" • ${chunk.sectionTitle}")
                                             },
                                             style = MaterialTheme.typography.labelSmall,
@@ -228,7 +406,7 @@ fun SourceReaderScreen(
                     Text("Nome: ${src.name}")
                     Text("Tipo: ${src.sourceType} (${src.mimeType})")
                     Text("Tamanho: ${FormatUtils.formatBytes(src.sizeBytes)}")
-                    Text("Páginas: ${src.pageCount}")
+                    Text("Unidades/Páginas: ${src.pageCount}")
                     Text("Chunks indexados: ${state.chunks.size}")
                     Text("Importado em: ${FormatUtils.formatDate(src.importedAt)}")
                     Text(

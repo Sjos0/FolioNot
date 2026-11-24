@@ -10,14 +10,18 @@ import com.sjos.folionote.data.local.SourceEntity
 import com.sjos.folionote.data.local.SourceStatus
 import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.data.local.StudioArtifactEntity
+import com.sjos.folionote.data.local.SyncTombstoneEntity
 import com.sjos.folionote.engine.document.FileStorageManager
 import com.sjos.folionote.engine.document.StorageStats
+import com.sjos.folionote.engine.drive.DriveSyncEngine
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.retrieval.RetrievedPassage
+import com.sjos.folionote.engine.web.WebClipperEngine
 import com.sjos.folionote.engine.worker.SourcePipelineManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.util.UUID
 
 data class GlobalSearchResults(
@@ -31,7 +35,8 @@ class NotebookRepository(
     private val db: FolioNoteDatabase,
     private val fileStorageManager: FileStorageManager,
     private val pipelineManager: SourcePipelineManager,
-    private val retriever: HybridRetriever
+    private val retriever: HybridRetriever,
+    private val webClipperEngine: WebClipperEngine = WebClipperEngine()
 ) {
     private val notebookDao = db.notebookDao()
     private val sourceDao = db.sourceDao()
@@ -87,9 +92,12 @@ class NotebookRepository(
     }
 
     suspend fun deleteNotebook(notebookId: String) {
+        val now = System.currentTimeMillis()
         sourceDao.getSourcesForNotebookOnce(notebookId).forEach { src ->
             pipelineManager.cancelProcessing(src.id)
+            recordTombstone(DriveSyncEngine.ENTITY_SOURCE, src.id, now)
         }
+        recordTombstone(DriveSyncEngine.ENTITY_NOTEBOOK, notebookId, now)
         fileStorageManager.deleteNotebookDirectory(notebookId)
         notebookDao.deleteNotebookById(notebookId)
     }
@@ -108,6 +116,7 @@ class NotebookRepository(
     }
 
     suspend fun deleteCollection(collectionId: String) {
+        recordTombstone(DriveSyncEngine.ENTITY_COLLECTION, collectionId, System.currentTimeMillis())
         notebookDao.deleteCollectionById(collectionId)
     }
 
@@ -150,6 +159,44 @@ class NotebookRepository(
         source
     }
 
+    suspend fun importWebUrl(notebookId: String, rawUrl: String): Result<SourceEntity> = withContext(Dispatchers.IO) {
+        val clippedRes = webClipperEngine.clipUrl(rawUrl)
+        clippedRes.map { clipped ->
+            val stored = fileStorageManager.createWebClipFile(
+                notebookId = notebookId,
+                title = clipped.title,
+                markdownContent = clipped.markdownContent
+            )
+            val meta = JSONObject().apply {
+                put("format", "web_page")
+                put("source_url", clipped.requestedUrl)
+                put("canonical_url", clipped.canonicalUrl)
+                put("final_url", clipped.finalUrl)
+                put("domain", clipped.domain)
+                put("captured_at", clipped.capturedAtMillis.toString())
+                if (!clipped.author.isNullOrBlank()) put("author", clipped.author)
+            }.toString()
+
+            val source = SourceEntity(
+                id = stored.sourceId,
+                notebookId = notebookId,
+                name = clipped.title,
+                mimeType = "text/markdown",
+                sourceType = SourceType.WEB_PAGE.name,
+                filePath = stored.file.absolutePath,
+                sizeBytes = stored.sizeBytes,
+                fileHashSha256 = stored.sha256,
+                extractedText = clipped.markdownContent,
+                metadataJson = meta,
+                processingStatus = SourceStatus.PENDING.name,
+                indexingProgress = 0.05f
+            )
+            sourceDao.upsertSource(source)
+            pipelineManager.scheduleProcessing(notebookId, source.id, "IMPORT")
+            source
+        }
+    }
+
     suspend fun reprocessSource(source: SourceEntity) {
         pipelineManager.scheduleProcessing(source.notebookId, source.id, "REPROCESS")
     }
@@ -175,6 +222,7 @@ class NotebookRepository(
 
     suspend fun deleteSource(source: SourceEntity) {
         pipelineManager.cancelProcessing(source.id)
+        recordTombstone(DriveSyncEngine.ENTITY_SOURCE, source.id, System.currentTimeMillis())
         fileStorageManager.deleteSourceFile(source.filePath)
         sourceDao.deleteSourceById(source.id)
     }
@@ -201,7 +249,21 @@ class NotebookRepository(
     }
 
     suspend fun deleteStudioArtifact(artifactId: String) {
+        recordTombstone(DriveSyncEngine.ENTITY_ARTIFACT, artifactId, System.currentTimeMillis())
         conversationDao.deleteStudioArtifactById(artifactId)
+    }
+
+    private suspend fun recordTombstone(entityType: String, entityId: String, now: Long) {
+        db.syncDao().upsertTombstone(
+            SyncTombstoneEntity(
+                id = "$entityType:$entityId",
+                entityType = entityType,
+                entityId = entityId,
+                deletedAt = now,
+                revision = now,
+                syncedToRemote = false
+            )
+        )
     }
 
     suspend fun searchGlobal(query: String): GlobalSearchResults = withContext(Dispatchers.IO) {

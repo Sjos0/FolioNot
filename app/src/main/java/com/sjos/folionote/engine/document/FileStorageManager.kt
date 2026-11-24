@@ -78,6 +78,29 @@ class FileStorageManager(private val context: Context) {
         )
     }
 
+    fun createWebClipFile(
+        notebookId: String,
+        title: String,
+        markdownContent: String
+    ): StoredSourceFile {
+        val sourceId = UUID.randomUUID().toString()
+        val safeTitle = title.trim().ifBlank { "Página Web" }
+        val safeName = safeTitle.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(48) + ".md"
+        val targetFile = File(notebookSourcesDir(notebookId), "${sourceId}_$safeName")
+        targetFile.writeText(markdownContent, Charsets.UTF_8)
+        return StoredSourceFile(
+            sourceId = sourceId,
+            displayName = safeTitle,
+            mimeType = "text/markdown",
+            sourceType = SourceType.WEB_PAGE,
+            file = targetFile,
+            sizeBytes = targetFile.length(),
+            sha256 = computeSha256(targetFile)
+        )
+    }
+
+    fun ensureNotebookSourcesDir(notebookId: String): File = notebookSourcesDir(notebookId)
+
     fun deleteSourceFile(filePath: String) {
         if (filePath.isBlank()) return
         runCatching { File(filePath).delete() }
@@ -119,6 +142,26 @@ class FileStorageManager(private val context: Context) {
         return when {
             lower.endsWith(".pdf") -> "application/pdf"
             lower.endsWith(".docx") -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            lower.endsWith(".pptx") -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            lower.endsWith(".epub") -> "application/epub+zip"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".bmp") -> "image/bmp"
+            lower.endsWith(".heic") -> "image/heic"
+            lower.endsWith(".mp3") -> "audio/mpeg"
+            lower.endsWith(".m4a") -> "audio/mp4"
+            lower.endsWith(".aac") -> "audio/aac"
+            lower.endsWith(".wav") -> "audio/wav"
+            lower.endsWith(".ogg") || lower.endsWith(".opus") -> "audio/ogg"
+            lower.endsWith(".flac") -> "audio/flac"
+            lower.endsWith(".mp4") -> "video/mp4"
+            lower.endsWith(".mkv") -> "video/x-matroska"
+            lower.endsWith(".webm") -> "video/webm"
+            lower.endsWith(".mov") -> "video/quicktime"
+            lower.endsWith(".3gp") -> "video/3gpp"
+            lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
             lower.endsWith(".md") || lower.endsWith(".markdown") -> "text/markdown"
             else -> "text/plain"
         }
@@ -130,12 +173,29 @@ class FileStorageManager(private val context: Context) {
         return when {
             lowerMime == "application/pdf" || lowerName.endsWith(".pdf") -> SourceType.PDF
             lowerMime.contains("wordprocessingml") || lowerName.endsWith(".docx") -> SourceType.DOCX
+            lowerMime.contains("presentationml") || lowerName.endsWith(".pptx") -> SourceType.PPTX
+            lowerMime == "application/epub+zip" || lowerName.endsWith(".epub") -> SourceType.EPUB
+            lowerMime.startsWith("image/") ||
+                lowerName.endsWith(".png") || lowerName.endsWith(".jpg") ||
+                lowerName.endsWith(".jpeg") || lowerName.endsWith(".webp") ||
+                lowerName.endsWith(".bmp") || lowerName.endsWith(".gif") ||
+                lowerName.endsWith(".heic") -> SourceType.IMAGE
+            lowerMime.startsWith("audio/") ||
+                lowerName.endsWith(".mp3") || lowerName.endsWith(".m4a") ||
+                lowerName.endsWith(".aac") || lowerName.endsWith(".wav") ||
+                lowerName.endsWith(".ogg") || lowerName.endsWith(".flac") ||
+                lowerName.endsWith(".opus") -> SourceType.AUDIO
+            lowerMime.startsWith("video/") ||
+                lowerName.endsWith(".mp4") || lowerName.endsWith(".mkv") ||
+                lowerName.endsWith(".webm") || lowerName.endsWith(".mov") ||
+                lowerName.endsWith(".3gp") -> SourceType.VIDEO
+            lowerMime == "text/html" || lowerName.endsWith(".html") || lowerName.endsWith(".htm") -> SourceType.WEB_PAGE
             lowerMime.contains("markdown") || lowerName.endsWith(".md") || lowerName.endsWith(".markdown") -> SourceType.MARKDOWN
             else -> SourceType.TXT
         }
     }
 
-    private fun computeSha256(file: File): String {
+    fun computeSha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         FileInputStream(file).use { input ->
             val buffer = ByteArray(16 * 1024)

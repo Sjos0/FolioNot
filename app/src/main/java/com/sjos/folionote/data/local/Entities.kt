@@ -38,11 +38,11 @@ data class NotebookEntity(
 )
 
 enum class SourceType {
-    PDF, TXT, MARKDOWN, DOCX, NOTE
+    PDF, TXT, MARKDOWN, DOCX, NOTE, PPTX, EPUB, IMAGE, AUDIO, VIDEO, WEB_PAGE
 }
 
 enum class SourceStatus {
-    PENDING, EXTRACTING, CHUNKING, EMBEDDING, READY, FAILED, REQUIRES_OCR
+    PENDING, EXTRACTING, CHUNKING, EMBEDDING, READY, PARTIAL, FAILED, REQUIRES_OCR, REQUIRES_TRANSCRIPTION
 }
 
 @Entity(
@@ -358,4 +358,42 @@ data class StudioArtifactEntity(
     val modelDisplayName: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "sync_records")
+data class SyncRecordEntity(
+    @PrimaryKey val recordKey: String,
+    val entityType: String,
+    val entityId: String,
+    val revision: Long,
+    val contentHash: String,
+    val localUpdatedAt: Long,
+    val lastSyncedAt: Long,
+    val remoteDriveFileId: String? = null,
+    val isDirty: Boolean = true
+)
+
+@Entity(tableName = "sync_tombstones")
+data class SyncTombstoneEntity(
+    @PrimaryKey val id: String,
+    val entityType: String,
+    val entityId: String,
+    val deletedAt: Long,
+    val revision: Long,
+    val syncedToRemote: Boolean = false
+)
+
+@Entity(tableName = "sync_conflicts")
+data class SyncConflictEntity(
+    @PrimaryKey val id: String,
+    val entityType: String,
+    val entityId: String,
+    val title: String,
+    val localUpdatedAt: Long,
+    val remoteUpdatedAt: Long,
+    val localSummary: String,
+    val remoteSummary: String,
+    val remotePayloadJson: String,
+    val resolutionStatus: String = "PENDING",
+    val detectedAt: Long = System.currentTimeMillis()
 )

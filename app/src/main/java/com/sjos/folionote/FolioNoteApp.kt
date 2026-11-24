@@ -9,15 +9,26 @@ import com.sjos.folionote.data.repository.NotebookRepository
 import com.sjos.folionote.data.repository.ProviderRepository
 import com.sjos.folionote.engine.ai.OpenAiCompatibleClient
 import com.sjos.folionote.engine.context.ContextBudgetPlanner
+import com.sjos.folionote.engine.document.AndroidMediaMetadataReader
+import com.sjos.folionote.engine.document.AudioTranscriptionEngine
+import com.sjos.folionote.engine.document.ConfigurableExternalOcrEngine
 import com.sjos.folionote.engine.document.DocumentExtractor
+import com.sjos.folionote.engine.document.ExternalAudioTranscriptionEngine
 import com.sjos.folionote.engine.document.FileStorageManager
+import com.sjos.folionote.engine.document.OcrEngine
+import com.sjos.folionote.engine.drive.BackupArchiveManager
+import com.sjos.folionote.engine.drive.DriveSyncEngine
+import com.sjos.folionote.engine.drive.GoogleDriveApiClient
+import com.sjos.folionote.engine.drive.GoogleDriveAuthManager
 import com.sjos.folionote.engine.indexing.CompositeEmbeddingProvider
 import com.sjos.folionote.engine.indexing.EmbeddingProvider
+import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
 import com.sjos.folionote.engine.indexing.GeminiEmbeddingProvider
 import com.sjos.folionote.engine.indexing.OpenAiCompatibleEmbeddingProvider
 import com.sjos.folionote.engine.indexing.StructuralChunker
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.tools.ToolEngine
+import com.sjos.folionote.engine.web.WebClipperEngine
 import com.sjos.folionote.engine.worker.SourcePipelineManager
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +39,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 
 class AppContainer(app: Application) {
+    val appContext: android.content.Context = app
     val database: FolioNoteDatabase = FolioNoteDatabase.getInstance(app)
     val preferencesStore: AppPreferencesStore = AppPreferencesStore(app)
     val cryptoManager: KeystoreCryptoManager = KeystoreCryptoManager()
@@ -39,6 +51,7 @@ class AppContainer(app: Application) {
             redactHeader("x-api-key")
             redactHeader("api-key")
             redactHeader("x-goog-api-key")
+            redactHeader("X-Goog-Api-Key")
             redactHeader("proxy-authorization")
         }
         OkHttpClient.Builder()
@@ -47,7 +60,15 @@ class AppContainer(app: Application) {
     }
 
     val fileStorageManager = FileStorageManager(app)
-    val documentExtractor = DocumentExtractor()
+    val webClipperEngine = WebClipperEngine(okHttpClient)
+    val ocrEngine: OcrEngine = ConfigurableExternalOcrEngine(preferencesStore, cryptoManager, okHttpClient)
+    val transcriptionEngine: AudioTranscriptionEngine = ExternalAudioTranscriptionEngine(preferencesStore, cryptoManager, okHttpClient)
+    val documentExtractor = DocumentExtractor(
+        ocrEngine = ocrEngine,
+        transcriptionEngine = transcriptionEngine,
+        mediaMetadataReader = AndroidMediaMetadataReader(),
+        webClipperEngine = webClipperEngine
+    )
     val chunker = StructuralChunker()
 
     private val openAiEmbeddingProvider = OpenAiCompatibleEmbeddingProvider(cryptoManager, okHttpClient)
@@ -56,11 +77,39 @@ class AppContainer(app: Application) {
         openAiProvider = openAiEmbeddingProvider,
         geminiProvider = geminiEmbeddingProvider
     )
+    val geminiEmbeddingManager = GeminiEmbeddingManager(
+        preferencesStore = preferencesStore,
+        cryptoManager = cryptoManager,
+        embeddingProvider = embeddingProvider
+    )
 
     val aiClient = OpenAiCompatibleClient(cryptoManager, okHttpClient)
     val retriever = HybridRetriever()
     val budgetPlanner = ContextBudgetPlanner()
     val pipelineManager = SourcePipelineManager(app, database)
+
+    val googleDriveAuthManager = GoogleDriveAuthManager(
+        context = app,
+        preferencesStore = preferencesStore,
+        cryptoManager = cryptoManager,
+        baseHttpClient = okHttpClient
+    )
+    val googleDriveApiClient = GoogleDriveApiClient(baseHttpClient = okHttpClient)
+    val backupArchiveManager = BackupArchiveManager(
+        context = app,
+        database = database,
+        fileStorageManager = fileStorageManager,
+        preferencesStore = preferencesStore
+    )
+    val driveSyncEngine = DriveSyncEngine(
+        context = app,
+        database = database,
+        preferencesStore = preferencesStore,
+        fileStorageManager = fileStorageManager,
+        authManager = googleDriveAuthManager,
+        apiClient = googleDriveApiClient,
+        backupArchiveManager = backupArchiveManager
+    )
 
     val toolEngine = ToolEngine(
         sourceDao = database.sourceDao(),
@@ -74,7 +123,8 @@ class AppContainer(app: Application) {
         db = database,
         fileStorageManager = fileStorageManager,
         pipelineManager = pipelineManager,
-        retriever = retriever
+        retriever = retriever,
+        webClipperEngine = webClipperEngine
     )
 
     val providerRepository = ProviderRepository(
@@ -87,6 +137,7 @@ class AppContainer(app: Application) {
         db = database,
         aiClient = aiClient,
         embeddingProvider = embeddingProvider,
+        geminiEmbeddingManager = geminiEmbeddingManager,
         retriever = retriever,
         budgetPlanner = budgetPlanner,
         toolEngine = toolEngine,

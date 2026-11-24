@@ -23,6 +23,7 @@ import com.sjos.folionote.engine.ai.ToolCallRequest
 import com.sjos.folionote.engine.context.ContextBudgetPlanner
 import com.sjos.folionote.engine.indexing.CompositeEmbeddingProvider
 import com.sjos.folionote.engine.indexing.EmbeddingTaskType
+import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
 import com.sjos.folionote.engine.indexing.GeminiEmbeddingProvider
 import com.sjos.folionote.engine.indexing.OpenAiCompatibleEmbeddingProvider
 import com.sjos.folionote.engine.retrieval.HybridRetriever
@@ -326,13 +327,16 @@ class AiAndEmbeddingClientTests {
                 }
             }
 
+            val crypto = KeystoreCryptoManager()
+            val embeddingProvider = CompositeEmbeddingProvider(
+                OpenAiCompatibleEmbeddingProvider(crypto),
+                GeminiEmbeddingProvider(crypto)
+            )
             val orchestrator = ChatOrchestrator(
                 db = db,
                 aiClient = fakeAi,
-                embeddingProvider = CompositeEmbeddingProvider(
-                    OpenAiCompatibleEmbeddingProvider(KeystoreCryptoManager()),
-                    GeminiEmbeddingProvider(KeystoreCryptoManager())
-                ),
+                embeddingProvider = embeddingProvider,
+                geminiEmbeddingManager = GeminiEmbeddingManager(prefs, crypto, embeddingProvider),
                 retriever = HybridRetriever(),
                 budgetPlanner = ContextBudgetPlanner(),
                 toolEngine = ToolEngine(
