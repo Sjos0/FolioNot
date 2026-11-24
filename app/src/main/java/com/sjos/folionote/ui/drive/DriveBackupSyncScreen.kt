@@ -592,7 +592,7 @@ private fun BackupRowCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${FormatUtils.formatBytes(item.sizeBytes)} • ${FormatUtils.formatDate(item.modifiedTimeMillis)}",
+                    text = "${FormatUtils.formatBytes(item.sizeBytes)} • ${FormatUtils.formatDate(item.modifiedEpochMs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

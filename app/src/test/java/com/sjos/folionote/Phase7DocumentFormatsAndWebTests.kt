@@ -83,7 +83,7 @@ class Phase7DocumentFormatsAndWebTests {
         }
 
         override fun loadImageAsPngBytes(file: File): ByteArray {
-            return file.readBytes().ifEmpty { byteArrayOf(1, 2, 3) }
+            return file.readBytes().let { if (it.isEmpty()) byteArrayOf(1, 2, 3) else it }
         }
     }
 
