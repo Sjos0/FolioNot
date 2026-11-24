@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.sjos.folionote"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.folionote.kvnxmq"
+    applicationId = "com.sjos.folionote"
     minSdk = 24
     targetSdk = 36
     versionCode = providers.gradleProperty("appVersionCode").orElse("1").get().toInt()
