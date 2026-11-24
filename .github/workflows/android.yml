@@ -40,15 +40,8 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle from the committed Wrapper
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Generate Gradle Wrapper
-        run: |
-          gradle wrapper --gradle-version 9.3.1 --distribution-type bin
-          chmod +x gradlew
 
       - name: Prepare debug signing key
         run: |
