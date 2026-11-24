@@ -25,7 +25,6 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.sjos.folionote.R
 import com.sjos.folionote.core.preferences.AppPreferencesStore
-import com.sjos.folionote.core.preferences.AppSettings
 import com.sjos.folionote.core.security.KeystoreCryptoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -367,7 +366,6 @@ class GoogleDriveAuthManager(
             is DriveAuthResult.Authorized -> {
                 val saved = saveAccessTokenAndLoadProfile(
                     accessToken = authRes.accessToken,
-                    refreshToken = null,
                     expiresInSeconds = authRes.expiresInSeconds,
                     fallbackProfile = pendingCredentialProfile
                 )
@@ -411,7 +409,6 @@ class GoogleDriveAuthManager(
             is DriveAuthResult.Authorized -> {
                 saveAccessTokenAndLoadProfile(
                     accessToken = extracted.accessToken,
-                    refreshToken = null,
                     expiresInSeconds = extracted.expiresInSeconds,
                     fallbackProfile = fallback
                 )
@@ -443,7 +440,6 @@ class GoogleDriveAuthManager(
 
     suspend fun saveAccessTokenAndLoadProfile(
         accessToken: String,
-        refreshToken: String? = null,
         expiresInSeconds: Long = 3600L,
         fallbackProfile: GoogleAccountProfile? = null
     ): Result<GoogleAccountProfile> = withContext(Dispatchers.IO) {
@@ -464,7 +460,6 @@ class GoogleDriveAuthManager(
             )
 
             val encryptedAccess = cryptoManager.encrypt(accessToken)
-            val encryptedRefresh = refreshToken?.takeIf { it.isNotBlank() }?.let { cryptoManager.encrypt(it) }
             val expiresAt = nowProvider() + (expiresInSeconds.coerceAtLeast(60L) * 1000L)
 
             preferencesStore.saveDriveAccountSession(
@@ -472,7 +467,6 @@ class GoogleDriveAuthManager(
                 displayName = mergedProfile.displayName,
                 photoUrl = mergedProfile.photoUrl,
                 encryptedAccessToken = encryptedAccess,
-                encryptedRefreshToken = encryptedRefresh,
                 expiresAt = expiresAt
             )
             mergedProfile
@@ -490,7 +484,6 @@ class GoogleDriveAuthManager(
                 displayName = profile.displayName,
                 photoUrl = profile.photoUrl,
                 encryptedAccessToken = latestSettings.driveEncryptedAccessToken,
-                encryptedRefreshToken = latestSettings.driveEncryptedRefreshToken.takeIf { it.isNotBlank() },
                 expiresAt = latestSettings.driveTokenExpiresAt
             )
             profile
@@ -520,7 +513,7 @@ class GoogleDriveAuthManager(
             }
         }
 
-        // Token is missing, corrupted, expired, or forceRefresh requested -> attempt silent renewal.
+        // Token is missing, corrupted, expired, or forceRefresh requested -> attempt silent renewal via AuthorizationClient.
         when (val silent = authorizationGateway.authorize(context, BACKUP_SCOPES, settings.driveAccountEmail)) {
             is DriveAuthResult.Authorized -> {
                 val encryptedNew = cryptoManager.encrypt(silent.accessToken)
@@ -530,7 +523,6 @@ class GoogleDriveAuthManager(
                     displayName = settings.driveAccountName,
                     photoUrl = settings.driveAccountPhotoUrl,
                     encryptedAccessToken = encryptedNew,
-                    encryptedRefreshToken = settings.driveEncryptedRefreshToken.takeIf { it.isNotBlank() },
                     expiresAt = newExpiresAt
                 )
                 return@withContext Result.success(silent.accessToken)
@@ -539,10 +531,6 @@ class GoogleDriveAuthManager(
                 return@withContext Result.failure(silent.exception)
             }
             is DriveAuthResult.NeedsResolution -> {
-                // Only fall back to OAuth refresh token if explicitly present in encrypted store.
-                val refreshAttempt = tryRefreshWithStoredRefreshToken(settings)
-                if (refreshAttempt != null) return@withContext refreshAttempt
-
                 val msg = "Autorização do Google Drive expirada ou revogada. Reconecte sua conta nas Configurações."
                 preferencesStore.markDriveNeedsReauth(msg)
                 return@withContext Result.failure(
@@ -550,9 +538,6 @@ class GoogleDriveAuthManager(
                 )
             }
             is DriveAuthResult.Unavailable -> {
-                val refreshAttempt = tryRefreshWithStoredRefreshToken(settings)
-                if (refreshAttempt != null) return@withContext refreshAttempt
-
                 val msg = "Não foi possível renovar a autorização Google silenciosamente (${silent.reason}). Reconecte sua conta."
                 preferencesStore.markDriveNeedsReauth(msg)
                 return@withContext Result.failure(DriveAuthException.ReauthRequired(msg))
@@ -561,85 +546,18 @@ class GoogleDriveAuthManager(
             is DriveAuthResult.Failed -> {
                 val reason = (silent as? DriveAuthResult.Failed)?.message
                     ?: "Autorização Google cancelada ou expirada."
-                val refreshAttempt = tryRefreshWithStoredRefreshToken(settings)
-                if (refreshAttempt != null) return@withContext refreshAttempt
-
                 preferencesStore.markDriveNeedsReauth(reason)
                 return@withContext Result.failure(DriveAuthException.ReauthRequired(reason))
             }
         }
     }
 
-    private suspend fun tryRefreshWithStoredRefreshToken(settings: AppSettings): Result<String>? {
-        val encRefresh = settings.driveEncryptedRefreshToken
-        if (encRefresh.isBlank()) return null
-        val plainRefresh = cryptoManager.decrypt(encRefresh)
-        if (plainRefresh.isBlank()) return null
-
-        val serverClientId = serverClientIdProvider().trim()
-        val formBuilder = FormBody.Builder()
-            .add("grant_type", "refresh_token")
-            .add("refresh_token", plainRefresh)
-        if (serverClientId.isNotBlank()) {
-            formBuilder.add("client_id", serverClientId)
-        }
-
-        val req = Request.Builder()
-            .url("${oauthBaseUrl.trimEnd('/')}/token")
-            .post(formBuilder.build())
-            .build()
-
-        val client = baseHttpClient.newBuilder()
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
-
-        return try {
-            client.newCall(req).execute().use { resp ->
-                val raw = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    val errMsg = extractOAuthError(raw)
-                    if (resp.code == 400 || resp.code == 401) {
-                        preferencesStore.markDriveNeedsReauth("Sessão Google revogada ($errMsg). Reconecte sua conta.")
-                        return Result.failure(DriveAuthException.ReauthRequired(errMsg))
-                    }
-                    return Result.failure(IllegalStateException("Falha ao renovar sessão Google (HTTP ${resp.code}): $errMsg"))
-                }
-                val json = JSONObject(raw)
-                val newAccess = json.optString("access_token").takeIf { it.isNotBlank() }
-                    ?: return Result.failure(IllegalStateException("Resposta OAuth sem access_token."))
-                val rotatedRefresh = json.optString("refresh_token").takeIf { it.isNotBlank() }
-                val expiresIn = json.optLong("expires_in", 3600L).coerceAtLeast(60L)
-
-                val encryptedAccess = cryptoManager.encrypt(newAccess)
-                val preservedEncryptedRefresh = rotatedRefresh?.let { cryptoManager.encrypt(it) }
-                    ?: settings.driveEncryptedRefreshToken
-
-                preferencesStore.saveDriveAccountSession(
-                    email = settings.driveAccountEmail ?: "",
-                    displayName = settings.driveAccountName,
-                    photoUrl = settings.driveAccountPhotoUrl,
-                    encryptedAccessToken = encryptedAccess,
-                    encryptedRefreshToken = preservedEncryptedRefresh,
-                    expiresAt = nowProvider() + (expiresIn * 1000L)
-                )
-                Result.success(newAccess)
-            }
-        } catch (io: IOException) {
-            Result.failure(io)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun disconnectAndRevoke() = withContext(Dispatchers.IO) {
         val settings = preferencesStore.settingsFlow.first()
-        val tokenToRevoke = when {
-            settings.driveEncryptedRefreshToken.isNotBlank() ->
-                runCatching { cryptoManager.decrypt(settings.driveEncryptedRefreshToken) }.getOrDefault("")
-            settings.driveEncryptedAccessToken.isNotBlank() ->
-                runCatching { cryptoManager.decrypt(settings.driveEncryptedAccessToken) }.getOrDefault("")
-            else -> ""
-        }
+        val tokenToRevoke = settings.driveEncryptedAccessToken
+            .takeIf { it.isNotBlank() }
+            ?.let { enc -> runCatching { cryptoManager.decrypt(enc) }.getOrDefault("") }
+            .orEmpty()
 
         if (tokenToRevoke.isNotBlank()) {
             runCatching {

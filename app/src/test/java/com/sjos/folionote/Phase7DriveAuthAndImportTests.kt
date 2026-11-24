@@ -60,9 +60,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 class Phase7DriveAuthAndImportTests {
 
     private class FakeOAuthAndDriveServer {
-        var tokenResponseCode = 200
-        var nextAccessToken = "ya29.oauth_refreshed"
-        var rotatedRefreshToken: String? = null
         var userEmail = "user@folionote.app"
         var userName = "FolioNote User"
         val revokedTokens = CopyOnWriteArrayList<String>()
@@ -87,24 +84,6 @@ class Phase7DriveAuthAndImportTests {
                 }
 
                 when {
-                    path == "/oauth2/token" && method == "POST" -> {
-                        if (tokenResponseCode != 200) {
-                            respond(
-                                tokenResponseCode,
-                                "application/json",
-                                """{"error":"invalid_grant","error_description":"Token has been expired or revoked."}""".toByteArray()
-                            )
-                        } else {
-                            val json = JSONObject()
-                                .put("access_token", nextAccessToken)
-                                .put("expires_in", 3600)
-                            if (!rotatedRefreshToken.isNullOrBlank()) {
-                                json.put("refresh_token", rotatedRefreshToken)
-                            }
-                            respond(200, "application/json", json.toString().toByteArray())
-                        }
-                    }
-
                     path == "/oauth2/revoke" && method == "POST" -> {
                         revokedTokens.add(body)
                         respond(200, "application/json", "{}".toByteArray())
@@ -259,7 +238,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "FolioNote User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.still_valid"),
-                encryptedRefreshToken = null,
                 expiresAt = now + 30 * 60_000L
             )
 
@@ -300,7 +278,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.expired_secret"),
-                encryptedRefreshToken = null,
                 expiresAt = now + 10_000L
             )
 
@@ -326,7 +303,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = "enc_v1:corrupted_base64_payload",
-                encryptedRefreshToken = null,
                 expiresAt = now + 3_600_000L
             )
             gateway.nextAuthorizeResult = DriveAuthResult.Authorized("ya29.recovered_after_corrupt", 3600L)
@@ -339,7 +315,7 @@ class Phase7DriveAuthAndImportTests {
     }
 
     @Test
-    fun `3_missing_refresh_credential_uses_silent_authorization_client_renewal`() = runTest {
+    fun `3_expired_token_uses_silent_authorization_client_renewal_without_legacy_oauth_token_fallback`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
@@ -351,13 +327,11 @@ class Phase7DriveAuthAndImportTests {
 
         try {
             prefs.clearDriveAccountSession()
-            // Stored without refresh token (standard AuthorizationClient Android behavior)
             prefs.saveDriveAccountSession(
                 email = "user@folionote.app",
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.old_expired"),
-                encryptedRefreshToken = null,
                 expiresAt = now - 5_000L
             )
 
@@ -376,6 +350,7 @@ class Phase7DriveAuthAndImportTests {
             assertEquals("ya29.new_silent_token", token)
             assertEquals(1, gateway.authorizeCalls)
             assertEquals("user@folionote.app", gateway.lastEmail)
+            assertTrue(server.recordedRequests.none { it.contains("/oauth2/token") })
 
             val updatedSettings = prefs.settingsFlow.first()
             assertEquals("ya29.new_silent_token", crypto.decrypt(updatedSettings.driveEncryptedAccessToken))
@@ -388,29 +363,20 @@ class Phase7DriveAuthAndImportTests {
     }
 
     @Test
-    fun `4_successful_oauth_refresh_token_renewal_updates_access_and_keeps_refresh`() = runTest {
+    fun `4_needs_resolution_flows_into_interactive_consent_and_updates_access_token`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
-        val server = FakeOAuthAndDriveServer().apply {
-            nextAccessToken = "ya29.oauth_renewed_123"
-        }
+        val server = FakeOAuthAndDriveServer()
+        val fakeAuth = FakeCredentialAuthenticator()
         val gateway = FakeAuthorizationGateway().apply {
-            // Simulate Play Services returning NeedsResolution, falling back to stored refresh token
             nextAuthorizeResult = DriveAuthResult.NeedsResolution(dummyIntentSender(context))
+            nextIntentResult = DriveAuthResult.Authorized("ya29.interactive_consented", 3600L)
         }
         val now = 3_000_000L
 
         try {
             prefs.clearDriveAccountSession()
-            prefs.saveDriveAccountSession(
-                email = "user@folionote.app",
-                displayName = "User",
-                photoUrl = null,
-                encryptedAccessToken = crypto.encrypt("ya29.expired"),
-                encryptedRefreshToken = crypto.encrypt("1//existing_refresh"),
-                expiresAt = now - 1000L
-            )
 
             val manager = GoogleDriveAuthManager(
                 context = context,
@@ -419,17 +385,26 @@ class Phase7DriveAuthAndImportTests {
                 baseHttpClient = OkHttpClient(),
                 oauthBaseUrl = "http://127.0.0.1:${server.port}/oauth2",
                 userInfoUrl = "http://127.0.0.1:${server.port}/userinfo",
+                credentialAuthenticator = fakeAuth,
                 authorizationGateway = gateway,
                 serverClientIdProvider = { "web-client.apps.googleusercontent.com" },
                 nowProvider = { now }
             )
 
-            val refreshed = manager.getValidAccessToken().getOrThrow()
-            assertEquals("ya29.oauth_renewed_123", refreshed)
+            val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+            val connectOutcome = manager.connectGoogleAccount(activity)
+            assertTrue(connectOutcome is GoogleConnectOutcome.NeedsConsentResolution)
+            assertEquals("web-client.apps.googleusercontent.com", fakeAuth.lastServerClientId)
+
+            val completedProfile = manager.completeAuthorizationResult(activity, Intent()).getOrThrow()
+            assertEquals("user@folionote.app", completedProfile.email)
+            assertTrue(server.recordedRequests.none { it.contains("/oauth2/token") })
+
             val saved = prefs.settingsFlow.first()
-            assertEquals("ya29.oauth_renewed_123", crypto.decrypt(saved.driveEncryptedAccessToken))
-            assertEquals("1//existing_refresh", crypto.decrypt(saved.driveEncryptedRefreshToken))
+            assertTrue(saved.isGoogleDriveConnected)
             assertFalse(saved.driveNeedsReauth)
+            assertEquals("ya29.interactive_consented", crypto.decrypt(saved.driveEncryptedAccessToken))
+            assertEquals("ya29.interactive_consented", manager.getValidAccessToken().getOrThrow())
         } finally {
             prefs.clearDriveAccountSession()
             server.stop()
@@ -441,9 +416,7 @@ class Phase7DriveAuthAndImportTests {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
-        val server = FakeOAuthAndDriveServer().apply {
-            tokenResponseCode = 400 // invalid_grant
-        }
+        val server = FakeOAuthAndDriveServer()
         val gateway = FakeAuthorizationGateway().apply {
             nextAuthorizeResult = DriveAuthResult.NeedsResolution(dummyIntentSender(context))
         }
@@ -456,7 +429,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.expired"),
-                encryptedRefreshToken = crypto.encrypt("1//revoked_refresh"),
                 expiresAt = now - 1000L
             )
 
@@ -474,6 +446,8 @@ class Phase7DriveAuthAndImportTests {
             val res = manager.getValidAccessToken()
             assertTrue(res.isFailure)
             assertTrue(res.exceptionOrNull() is DriveAuthException.ReauthRequired)
+            assertNotNull((res.exceptionOrNull() as DriveAuthException.ReauthRequired).resolutionIntent)
+            assertTrue(server.recordedRequests.none { it.contains("/oauth2/token") })
 
             val settings = prefs.settingsFlow.first()
             assertTrue(settings.driveNeedsReauth)
@@ -485,7 +459,7 @@ class Phase7DriveAuthAndImportTests {
     }
 
     @Test
-    fun `6_credentials_are_preserved_across_profile_refresh_and_cleared_on_account_switch`() = runTest {
+    fun `6_credentials_are_preserved_across_profile_refresh_and_replaced_on_account_switch`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
@@ -506,7 +480,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "Primary",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.expired_before_profile"),
-                encryptedRefreshToken = crypto.encrypt("1//keep_me_safe"),
                 expiresAt = now - 5_000L
             )
 
@@ -528,9 +501,8 @@ class Phase7DriveAuthAndImportTests {
 
             val afterProfile = prefs.settingsFlow.first()
             assertEquals("ya29.renewed_during_profile", crypto.decrypt(afterProfile.driveEncryptedAccessToken))
-            assertEquals("1//keep_me_safe", crypto.decrypt(afterProfile.driveEncryptedRefreshToken))
 
-            // Switch to another Google account -> old account's refresh token must be cleared!
+            // Switch to another Google account -> Credential Manager session cleared & new account replaces old credentials
             fakeAuth.nextResult = CredentialAuthResult.Authenticated(
                 GoogleAccountProfile("secondary@folionote.app", "Secondary"),
                 "id_token_sec"
@@ -547,7 +519,6 @@ class Phase7DriveAuthAndImportTests {
             val afterSwitch = prefs.settingsFlow.first()
             assertEquals("secondary@folionote.app", afterSwitch.driveAccountEmail)
             assertEquals("ya29.secondary_token", crypto.decrypt(afterSwitch.driveEncryptedAccessToken))
-            assertEquals("", afterSwitch.driveEncryptedRefreshToken)
         } finally {
             prefs.clearDriveAccountSession()
             server.stop()
@@ -570,7 +541,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.to_revoke"),
-                encryptedRefreshToken = crypto.encrypt("1//refresh_to_revoke"),
                 expiresAt = System.currentTimeMillis() + 3600_000L
             )
 
@@ -588,13 +558,12 @@ class Phase7DriveAuthAndImportTests {
             manager.disconnectAndRevoke()
             assertEquals(1, gateway.revokeCalls)
             assertEquals(1, fakeAuth.clearCalls)
-            assertTrue(server.revokedTokens.isNotEmpty())
+            assertTrue(server.revokedTokens.any { it.contains("ya29.to_revoke") })
 
             val cleared = prefs.settingsFlow.first()
             assertFalse(cleared.isGoogleDriveConnected)
             assertNull(cleared.driveAccountEmail)
             assertEquals("", cleared.driveEncryptedAccessToken)
-            assertEquals("", cleared.driveEncryptedRefreshToken)
             assertFalse(cleared.driveNeedsReauth)
         } finally {
             prefs.clearDriveAccountSession()
@@ -619,7 +588,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.expired"),
-                encryptedRefreshToken = null,
                 expiresAt = now - 10_000L
             )
 
@@ -661,7 +629,6 @@ class Phase7DriveAuthAndImportTests {
                 displayName = "User",
                 photoUrl = null,
                 encryptedAccessToken = crypto.encrypt("ya29.expired"),
-                encryptedRefreshToken = null,
                 expiresAt = now - 10_000L
             )
 

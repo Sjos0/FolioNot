@@ -108,7 +108,7 @@ dependencies {
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.pdfbox.android)
   implementation(libs.coil.compose)
-  implementation(libs.androidx.browser)
+  // implementation(libs.androidx.browser)
   implementation(libs.play.services.auth)
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)

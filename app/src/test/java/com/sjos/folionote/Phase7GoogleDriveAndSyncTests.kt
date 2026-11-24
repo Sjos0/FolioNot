@@ -111,22 +111,6 @@ class Phase7GoogleDriveAndSyncTests {
                 }
 
                 when {
-                    // OAuth token exchange & refresh
-                    path == "/oauth2/token" && method == "POST" -> {
-                        val form = bodyBytes.toString(Charsets.UTF_8)
-                        val json = if (form.contains("grant_type=refresh_token")) {
-                            JSONObject()
-                                .put("access_token", "ya29.refreshed_access_token")
-                                .put("expires_in", 3600)
-                        } else {
-                            JSONObject()
-                                .put("access_token", "ya29.initial_access_token")
-                                .put("refresh_token", "1//refresh_token_secret")
-                                .put("expires_in", 3600)
-                        }
-                        respondJson(200, json.toString())
-                    }
-
                     // OAuth token revoke
                     path == "/oauth2/revoke" && method == "POST" -> {
                         revokedTokens.add(bodyBytes.toString(Charsets.UTF_8))
@@ -388,7 +372,6 @@ class Phase7GoogleDriveAndSyncTests {
                 displayName = saved.driveAccountName,
                 photoUrl = saved.driveAccountPhotoUrl,
                 encryptedAccessToken = saved.driveEncryptedAccessToken,
-                encryptedRefreshToken = null,
                 expiresAt = System.currentTimeMillis() - 10_000L
             )
             val refreshedToken = authManager.getValidAccessToken().getOrThrow()
@@ -433,7 +416,7 @@ class Phase7GoogleDriveAndSyncTests {
 
             // With picture URL present
             fakeDrive.profilePictureToReturn = "https://lh3.googleusercontent.com/avatar-folionote.png"
-            val p1 = authManager.saveAccessTokenAndLoadProfile("ya29.token1", "refresh1", 3600L).getOrThrow()
+            val p1 = authManager.saveAccessTokenAndLoadProfile("ya29.token1", 3600L).getOrThrow()
             assertEquals("https://lh3.googleusercontent.com/avatar-folionote.png", p1.photoUrl)
             assertEquals("https://lh3.googleusercontent.com/avatar-folionote.png", prefs.settingsFlow.first().driveAccountPhotoUrl)
             assertEquals("Pesquisador FolioNote", prefs.settingsFlow.first().driveAccountName)
@@ -472,12 +455,11 @@ class Phase7GoogleDriveAndSyncTests {
             val ocrSecret = "vision-SECRET-OCR-777"
             val transSecret = "whisper-SECRET-TRANS-666"
             val driveAccessSecret = "ya29.SECRET-DRIVE-ACCESS"
-            val driveRefreshSecret = "1//SECRET-DRIVE-REFRESH"
 
             prefs.saveGeminiEmbeddingConfig(true, "gemini-embedding-2-preview", 1536, crypto.encrypt(geminiSecret))
             prefs.saveOcrConfig(OcrProviderType.GOOGLE_CLOUD_VISION, "https://vision.googleapis.com/v1/images:annotate", "", crypto.encrypt(ocrSecret))
             prefs.saveTranscriptionConfig(TranscriptionProviderType.OPENAI_AUDIO_COMPAT, "https://api.openai.com/v1/audio/transcriptions", "whisper-1", "pt", crypto.encrypt(transSecret))
-            prefs.saveDriveAccountSession("user@test.com", "User", null, crypto.encrypt(driveAccessSecret), crypto.encrypt(driveRefreshSecret), System.currentTimeMillis() + 3600_000L)
+            prefs.saveDriveAccountSession("user@test.com", "User", null, crypto.encrypt(driveAccessSecret), System.currentTimeMillis() + 3600_000L)
 
             db.providerAndModelDao().upsertProvider(
                 ProviderEntity("p_secret", "Provedor Chat", "https://api.openai.com/v1", encryptedApiKey = crypto.encrypt(chatSecret))
@@ -524,9 +506,9 @@ class Phase7GoogleDriveAndSyncTests {
 
             val allText = entriesContent.values.joinToString("\n") { it.toString(Charsets.UTF_8) }
             val forbiddenSubstrings = listOf(
-                geminiSecret, chatSecret, ocrSecret, transSecret, driveAccessSecret, driveRefreshSecret,
+                geminiSecret, chatSecret, ocrSecret, transSecret, driveAccessSecret,
                 "encryptedApiKey", "geminiEmbeddingEncryptedKey", "ocrEncryptedApiKey", "transcriptionEncryptedApiKey",
-                "driveEncryptedAccessToken", "driveEncryptedRefreshToken", "enc_v1:", "test_v1:"
+                "driveEncryptedAccessToken", "drive_enc_refresh_token", "enc_v1:", "test_v1:"
             )
             for (secret in forbiddenSubstrings) {
                 assertFalse("Backup ZIP leaked secret marker: $secret", allText.contains(secret))
@@ -624,7 +606,7 @@ class Phase7GoogleDriveAndSyncTests {
 
         try {
             prefs.clearDriveAccountSession()
-            prefs.saveDriveAccountSession("user@test.com", "User", null, crypto.encrypt("ya29.valid"), null, System.currentTimeMillis() + 3600_000L)
+            prefs.saveDriveAccountSession("user@test.com", "User", null, crypto.encrypt("ya29.valid"), System.currentTimeMillis() + 3600_000L)
 
             val port = fakeDrive.port
             val apiClient = GoogleDriveApiClient(OkHttpClient(), "http://127.0.0.1:$port/drive/v3", "http://127.0.0.1:$port/upload/drive/v3")
@@ -661,7 +643,7 @@ class Phase7GoogleDriveAndSyncTests {
 
         try {
             prefs.clearDriveAccountSession()
-            prefs.saveDriveAccountSession("sync@test.com", "Sync", null, crypto.encrypt("ya29.sync"), null, System.currentTimeMillis() + 3600_000L)
+            prefs.saveDriveAccountSession("sync@test.com", "Sync", null, crypto.encrypt("ya29.sync"), System.currentTimeMillis() + 3600_000L)
 
             val port = fakeDrive.port
             val apiClient = GoogleDriveApiClient(OkHttpClient(), "http://127.0.0.1:$port/drive/v3", "http://127.0.0.1:$port/upload/drive/v3")
@@ -750,7 +732,7 @@ class Phase7GoogleDriveAndSyncTests {
         try {
             prefs.clearDriveAccountSession()
             prefs.setDriveConflictPolicy(DriveConflictPolicy.ASK_USER)
-            prefs.saveDriveAccountSession("conflict@test.com", "User", null, crypto.encrypt("ya29.conf"), null, System.currentTimeMillis() + 3600_000L)
+            prefs.saveDriveAccountSession("conflict@test.com", "User", null, crypto.encrypt("ya29.conf"), System.currentTimeMillis() + 3600_000L)
 
             val port = fakeDrive.port
             val apiClient = GoogleDriveApiClient(OkHttpClient(), "http://127.0.0.1:$port/drive/v3", "http://127.0.0.1:$port/upload/drive/v3")
