@@ -1,0 +1,710 @@
+# FolioNote — Especificação da Fase 8
+## Compatibilidade Android 7+, atualizador interno por GitHub Releases, OCR local gratuito e transcrição Groq Whisper
+
+**Tipo:** especificação de produto, arquitetura, implementação e validação
+**Repositório oficial:** https://github.com/Sjos0/FolioNot
+**Branch de trabalho:** main
+**Commit-base auditado:** d0661b650f4324c6cc09f1c5df27b415f28f4fdd
+**Arquivo de referência anterior:** public/assets/aistudio/Temp_51bdf43b.txt
+
+---
+
+## 0. Instruções de execução
+
+Leia integralmente este documento e também o arquivo de especificação anterior antes de alterar o projeto.
+
+Este documento complementa a especificação anterior; não a substitui. Preserve todos os requisitos e funcionalidades já implementados, especialmente:
+
+- arquitetura Android nativa Kotlin + Jetpack Compose;
+- Room, DataStore e Android Keystore;
+- interface universal de provedores de IA compatíveis com OpenAI;
+- Google Drive, backups privados em `appDataFolder` e importação separada;
+- Gemini Embedding 2 opcional, com chave do próprio usuário;
+- funcionamento offline de cadernos, fontes já armazenadas, histórico e metadados;
+- ausência de modelos LLM locais e de downloads de modelos de chat;
+- app leve, sem serviços permanentes desnecessários.
+
+**Escopo desta fase:** implementar os três blocos descritos abaixo e suas validações. Não reescrever funcionalidades não relacionadas.
+
+**Não alterar o Gradle Wrapper nem suas permissões.** O `gradlew` já foi corrigido para modo Git `100755` no commit `d0661b6`. Não reverter essa correção.
+
+**Não gerar APK de release, não publicar release e não inventar resultados de testes.** O release só poderá ser publicado após a validação final e a configuração segura da assinatura de produção.
+
+Não declarar que algo está concluído apenas porque existe uma classe, uma dependência ou uma tela. Entregar implementação funcional, testes e evidências.
+
+---
+
+# 1. Compatibilidade com Android 7.0 ou superior
+
+## 1.1 Requisito obrigatório
+
+O FolioNote deve instalar e funcionar em dispositivos com **Android 7.0 (API 24) ou superior**, incluindo Android 7.1 (API 25) e versões atuais.
+
+A compatibilidade deve ser um requisito técnico interno. **Não exibir no aplicativo textos, selos, banners ou mensagens anunciando “compatível com Android 7” ou “Android 7+”.** Não é uma informação que precisa aparecer na interface.
+
+## 1.2 Estado atual encontrado
+
+No commit-base auditado:
+
+- `app/build.gradle.kts` declara `minSdk = 24`;
+- `compileSdk` está em 36;
+- `targetSdk` está em 36.
+
+Portanto, o mínimo de API já está declarado corretamente. Isso, isoladamente, não prova compatibilidade real.
+
+## 1.3 Auditoria de compatibilidade
+
+Auditar o projeto inteiro, incluindo:
+
+- dependências diretas e transitivas;
+- AndroidX, Jetpack Compose, Room, DataStore, WorkManager, Credential Manager e Google Identity;
+- bibliotecas de PDF, mídia, rede e armazenamento;
+- APIs Android chamadas diretamente;
+- permissões e comportamento de instalação;
+- recursos XML, Manifest, FileProvider e configurações de rede;
+- serviços, workers, notificações e tarefas em segundo plano.
+
+Regras:
+
+1. Nenhuma dependência pode exigir minSdk superior a 24.
+2. Nenhuma API exclusiva de versões posteriores pode ser chamada sem verificação de versão e alternativa compatível.
+3. Usar AndroidX e APIs de compatibilidade quando necessário.
+4. Não aumentar `minSdk` para resolver conflitos. Substituir ou adaptar a dependência incompatível.
+5. Não remover funcionalidades silenciosamente para dispositivos antigos.
+6. Se algum recurso realmente depender de serviço do Google Play ou de uma API posterior, oferecer fallback e explicar a limitação somente quando o usuário tentar usar aquele recurso.
+7. A ausência do Google Play Services não pode impedir a inicialização do aplicativo nem quebrar recursos que não dependem dele.
+
+## 1.4 Matriz de validação obrigatória
+
+Criar ou adaptar testes para:
+
+- Android 7.0 / API 24 — mínimo obrigatório;
+- Android 7.1 / API 25;
+- Android 8.0 / API 26 — mudanças de instalação de fontes desconhecidas;
+- uma versão Android atual suportada pelo CI.
+
+Executar pelo menos:
+
+- instalação limpa;
+- inicialização e navegação;
+- abrir cadernos e fontes locais;
+- leitura de PDFs e imagens;
+- acesso a configurações;
+- armazenamento local e Room;
+- fluxo de importação de arquivos;
+- fluxo de autenticação Google, quando o ambiente de teste permitir;
+- atualização do aplicativo;
+- OCR local;
+- transcrição remota, com mock/teste de rede.
+
+Usar emuladores API 24 e versão atual no GitHub Actions, quando viável. Se o runner ou uma dependência impedir o emulador API 24, registrar a limitação e fornecer outra evidência reproduzível. Build bem-sucedido em API 36 não comprova compatibilidade com API 24.
+
+---
+
+# 2. Atualizador interno do FolioNote via GitHub Releases
+
+## 2.1 Objetivo e experiência do usuário
+
+Adicionar em **Configurações** uma ação:
+
+**Verificar atualizações**
+
+Ao tocar:
+
+1. Abrir um diálogo/modal Compose dentro do FolioNote.
+2. Exibir estado de consulta enquanto busca a versão publicada no GitHub.
+3. Se não houver versão nova, mostrar que o aplicativo já está atualizado.
+4. Se houver versão nova, mostrar:
+   - nome e número da versão;
+   - versão atualmente instalada;
+   - resumo/notas da versão (release notes);
+   - tamanho do APK, quando disponível;
+   - botão para baixar e instalar.
+5. Ao iniciar o download, manter o diálogo aberto e mostrar o progresso real.
+6. Exibir porcentagem, tamanho baixado/total e estado atual.
+7. Permitir cancelar o download com limpeza segura do arquivo parcial.
+8. Após o download, verificar integridade e compatibilidade do APK.
+9. Solicitar a permissão de instalação quando o Android exigir.
+10. Abrir o instalador nativo do Android para a confirmação final.
+11. Ao retornar ao aplicativo, verificar se a atualização foi concluída e atualizar a versão exibida.
+
+**Todo o fluxo de consulta, detalhes, download, progresso, cancelamento, verificação e instruções de permissão deve ser apresentado no próprio FolioNote.**
+
+Limitação obrigatória e transparente: o Android controla a tela final de confirmação/instalação. Um aplicativo comum não pode instalar silenciosamente uma atualização sem privilégios especiais de sistema, device owner ou distribuição gerenciada. Não tentar contornar essa proteção. O FolioNote conduz o processo e entrega o APK ao instalador oficial do Android.
+
+## 2.2 Fonte oficial das versões
+
+Consultar exclusivamente os releases publicados do repositório oficial:
+
+`Sjos0/FolioNot`
+
+Endpoint recomendado:
+
+`GET https://api.github.com/repos/Sjos0/FolioNot/releases/latest`
+
+O repositório é público; não exigir token GitHub do usuário.
+
+Enviar cabeçalhos apropriados, incluindo:
+
+- `Accept: application/vnd.github+json`;
+- `X-GitHub-Api-Version` conforme versão atual suportada pela API;
+- `User-Agent` identificando FolioNote.
+
+Usar a API REST oficial do GitHub, sem scraping de HTML.
+
+Regras:
+
+- ignorar releases draft e prerelease;
+- não tratar tags sem release publicado como versões disponíveis;
+- identificar o APK correto entre os assets;
+- não confiar apenas no nome ou na descrição do release;
+- tratar 404, falha de rede, timeout, rate limit e resposta inválida;
+- usar ETag/If-None-Match e cache local quando apropriado para reduzir consultas;
+- não consultar repetidamente em loop;
+- nunca bloquear a interface durante a requisição.
+
+## 2.3 Contrato dos assets de release
+
+Definir um padrão único e documentado para os assets publicados. Exemplo:
+
+- `FolioNote-vX.Y.Z.apk`
+- `release-manifest.json`
+
+O manifesto deve identificar, no mínimo:
+
+- `packageName` = `com.sjos.folionote`;
+- `versionName`;
+- `versionCode`;
+- `minSdk`;
+- nome exato do APK;
+- tamanho esperado;
+- SHA-256;
+- fingerprint SHA-256 do certificado de assinatura de release;
+- tag e URL do release.
+
+Não publicar um release de produção sem o APK correto e os metadados necessários. Não selecionar APK de debug.
+
+Se o GitHub fornecer `digest` SHA-256 do asset, validar esse valor. Se o campo não estiver disponível, usar o SHA-256 do manifesto. A verificação do certificado do APK contra o certificado do aplicativo instalado é obrigatória mesmo quando houver digest.
+
+## 2.4 Comparação de versões
+
+Não comparar versões como texto simples.
+
+- Ler a versão instalada pelo PackageManager.
+- Obter a versão remota do manifesto.
+- Comparar principalmente `versionCode`, que deve ser inteiro monotonicamente crescente.
+- `versionName` serve para apresentação.
+- Se `versionCode` remoto for igual ou inferior ao instalado, não oferecer downgrade.
+- Rejeitar manifesto ausente, inconsistente ou com package name diferente.
+
+## 2.5 Download e desempenho
+
+O download precisa ser robusto e observável:
+
+- executar fora da Main Thread;
+- usar streaming para arquivo, sem carregar APK inteiro na memória;
+- exibir progresso real;
+- suportar cancelamento;
+- tratar perda de rede e retomada de forma segura, se a infraestrutura escolhida permitir;
+- evitar múltiplos downloads simultâneos;
+- limitar tamanho máximo e validar o tamanho declarado;
+- armazenar temporariamente em diretório privado do aplicativo;
+- não salvar APK em pasta pública;
+- remover arquivos parciais após cancelamento ou falha;
+- não apagar um APK validado antes de o instalador terminar de utilizá-lo;
+- evitar consumo excessivo de RAM e bateria.
+
+A implementação pode usar OkHttp + coroutine/WorkManager, desde que sobreviva adequadamente a rotação, saída da tela e interrupções. Para downloads longos, avaliar WorkManager com progresso e foreground notification, respeitando a API 24. A interface deve observar o estado persistido do trabalho.
+
+Estados mínimos da interface:
+
+- verificando;
+- atualizado;
+- atualização disponível;
+- preparando download;
+- baixando;
+- download pausado/interrompido;
+- verificando integridade;
+- aguardando permissão;
+- pronto para instalar;
+- aguardando confirmação do Android;
+- instalado;
+- cancelado;
+- falha com mensagem compreensível.
+
+## 2.6 Segurança do APK
+
+Segurança obrigatória:
+
+1. Usar HTTPS.
+2. Validar status HTTP, tamanho, nome e tipo esperado do asset.
+3. Calcular SHA-256 do arquivo baixado e comparar com o digest publicado.
+4. Inspecionar o APK antes de entregá-lo ao instalador.
+5. Confirmar que o package name é exatamente `com.sjos.folionote`.
+6. Confirmar que o `versionCode` corresponde ao manifesto e é superior ao instalado.
+7. Confirmar que o certificado de assinatura do APK é o mesmo do aplicativo instalado.
+8. O sistema Android também deve validar a assinatura durante a instalação; nunca tentar ignorar essa verificação.
+9. Rejeitar APK inválido, adulterado, de outro pacote ou assinado por certificado diferente.
+10. Nunca aceitar URL de APK arbitrária fornecida por release body, comentário ou input externo. O download deve vir do asset associado ao release oficial e validado.
+11. Nunca executar APK baixado automaticamente.
+12. Nunca armazenar credenciais ou tokens GitHub no aplicativo.
+
+Para comparar certificado:
+
+- API 28+: usar `SigningInfo` / `GET_SIGNING_CERTIFICATES`;
+- API 24–27: usar o caminho compatível com `GET_SIGNATURES`;
+- calcular fingerprint SHA-256 do certificado e comparar com o certificado do app instalado;
+- manter a lógica de compatibilidade sem chamadas a APIs novas desprotegidas.
+
+A chave privada de assinatura nunca pode entrar no repositório, APK, arquivo de especificação ou código-fonte. Preservar o processo seguro de assinatura já existente no GitHub Actions. Se a chave de release ainda não estiver configurada, registrar isso como bloqueio de release; não gerar uma chave improvisada nem publicar APK de debug.
+
+## 2.7 Permissão para instalar APK
+
+O usuário precisa conceder a autorização exigida pelo Android.
+
+- Declarar `REQUEST_INSTALL_PACKAGES` no Manifest quando aplicável.
+- API 26+: verificar `PackageManager.canRequestPackageInstalls()`; se falso, abrir `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES` direcionado ao pacote FolioNote.
+- API 24–25: tratar o fluxo legado de fontes desconhecidas; o usuário pode precisar habilitar a opção global nas configurações de segurança do Android. Não chamar APIs que só existem na API 26.
+- Ao retornar das configurações, verificar novamente a permissão.
+- Não assumir que o usuário concedeu a permissão.
+- Explicar de forma curta por que a permissão é necessária e que ela será usada para instalar a atualização do FolioNote.
+- Não solicitar essa permissão durante a inicialização; somente quando o usuário iniciar a instalação.
+
+Entregar o APK ao instalador usando `FileProvider`, URI `content://` e `FLAG_GRANT_READ_URI_PERMISSION`. Não expor `file://`.
+
+A abertura do instalador deve funcionar em API 24 e versões posteriores. Tratar `ActivityNotFoundException`, `SecurityException`, cancelamento do usuário e retorno sem instalação.
+
+## 2.8 Assinatura e workflow de release
+
+Auditar o workflow existente `.github/workflows/android.yml`.
+
+Preservar a regra atual de não publicar releases em builds comuns da branch main. A publicação de release deve continuar vinculada a tag/versionamento e à assinatura de produção.
+
+Ajustar, se necessário, o workflow para:
+
+- gerar APK release assinado;
+- aplicar versionCode/versionName coerentes com a tag;
+- verificar package name e metadados;
+- gerar SHA-256;
+- publicar APK e manifesto como assets do release;
+- impedir publicação se assinatura, build, testes ou validações falharem;
+- nunca publicar APK debug como atualização de produção.
+
+Não inventar secrets. Não imprimir valores de secrets nos logs. Não modificar o Gradle Wrapper.
+
+## 2.9 Testes do atualizador
+
+Criar testes unitários para:
+
+- parsing do JSON do GitHub;
+- release sem APK;
+- release draft/prerelease;
+- versão igual, menor e maior;
+- manifesto inválido;
+- package name divergente;
+- asset ausente;
+- digest divergente;
+- APK truncado/corrompido;
+- certificado diferente;
+- download interrompido;
+- cancelamento;
+- HTTP 404, 403, 429 e 5xx;
+- ausência de internet;
+- falta de permissão de instalação;
+- retorno do instalador sem atualização;
+- API 24–25 e API 26+.
+
+Criar testes instrumentados ou validações em emulador para o fluxo real do instalador quando possível.
+
+---
+
+# 3. OCR: prioridade para alternativa gratuita e local
+
+## 3.1 O que é OCR
+
+OCR significa *Optical Character Recognition*, em português, reconhecimento óptico de caracteres.
+
+É a tecnologia que transforma texto que está dentro de uma imagem em texto digital que o aplicativo consegue pesquisar, copiar, indexar e usar no RAG.
+
+Exemplos:
+
+- PDF digitalizado como fotografia de páginas;
+- foto de uma página de livro;
+- imagem de um quadro ou slide;
+- documento fotografado;
+- captura de tela com texto.
+
+Um PDF com texto selecionável normalmente já pode ser extraído sem OCR. OCR é necessário quando o conteúdo está apenas como pixels/imagem.
+
+OCR não é transcrição de áudio. São funcionalidades diferentes.
+
+## 3.2 Estado atual encontrado
+
+O projeto já possui:
+
+- `OcrEngine.kt`;
+- `ConfigurableExternalOcrEngine`;
+- renderização de páginas PDF por `PdfRenderer`;
+- leitura de imagens;
+- integração com Google Cloud Vision;
+- integração com endpoints de visão compatíveis com OpenAI;
+- endpoint OCR personalizado.
+
+Atualmente o fluxo depende de provedor externo e chave/endpoint configurados. A interface informa que não há modelo local embutido.
+
+Isso não deve continuar como única opção.
+
+## 3.3 Solução prioritária: ML Kit Text Recognition local
+
+Implementar OCR local usando Google ML Kit Text Recognition para Android, priorizando modelo bundled quando a confiabilidade offline for necessária.
+
+Referência técnica inicial:
+
+- `com.google.mlkit:text-recognition` (confirmar versão estável e compatível no momento da implementação);
+- Text Recognition v2;
+- `TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)`;
+- entrada `InputImage`;
+- saída de texto reconhecido com blocos/linhas.
+
+O ML Kit é uma SDK gratuita, executa no dispositivo e pode funcionar offline. A documentação oficial informa suporte à API 21 ou superior, portanto API 24 é compatível.
+
+Preferir modelo bundled para que o OCR básico não dependa de baixar o modelo na primeira utilização nem de Google Play Services disponível. Considerar o impacto no tamanho do APK e registrar a diferença.
+
+Para o escopo inicial, o idioma prioritário é português (alfabeto latino). Não prometer reconhecimento de todos os alfabetos sem incluir e validar os módulos correspondentes.
+
+## 3.4 Fluxo local
+
+- Imagens: decodificar com limite de dimensão/memória e enviar ao ML Kit.
+- PDFs: renderizar uma página por vez com o `AndroidPdfPageRenderer` já existente e processar sequencialmente.
+- Não carregar todas as páginas de PDFs longos simultaneamente.
+- Liberar/reutilizar bitmaps corretamente.
+- Respeitar cancelamento de coroutine.
+- Preservar número da página e estrutura de texto.
+- Retornar resultado parcial quando algumas páginas falharem.
+- Fechar o recognizer e liberar recursos.
+- Executar em dispatcher de I/O ou executor apropriado; nunca bloquear a interface.
+
+O resultado deve continuar alimentando o fluxo atual de `DocumentExtractor`, indexação e RAG, sem duplicar fontes nem quebrar metadados.
+
+## 3.5 Configurações e fallback
+
+- OCR local deve ser a opção padrão para novas instalações.
+- O usuário não deve precisar criar conta, informar chave ou pagar para usar OCR básico.
+- Preservar Google Cloud Vision, Vision OpenAI-compatible e endpoint personalizado como opções avançadas/opcionais, sem removê-las.
+- Não exigir chave OpenAI nem assinatura ChatGPT para OCR local.
+- Não enviar imagem/PDF para provedor externo sem configuração explícita do usuário.
+- Explicar na interface, em linguagem simples, que o OCR local funciona no aparelho e não envia o documento para um serviço de OCR externo.
+- Se o OCR local falhar, mostrar erro específico e permitir ao usuário optar por um provedor externo já configurado. Não enviar automaticamente documentos privados à nuvem.
+
+## 3.6 Testes OCR
+
+- imagem com texto português;
+- imagem inclinada ou de baixa resolução;
+- PDF nativo com texto selecionável (não deve acionar OCR desnecessariamente);
+- PDF digitalizado de várias páginas;
+- página em branco;
+- PDF corrompido;
+- cancelamento durante processamento;
+- memória limitada;
+- ausência de internet;
+- API 24;
+- confirmação de que nenhum arquivo é enviado pela rede no modo local.
+
+---
+
+# 4. Transcrição de áudio e vídeo: Groq Whisper como alternativa
+
+## 4.1 Objetivo
+
+Adicionar **Groq Whisper** como provedor de transcrição de áudio e vídeo, preservando o provedor OpenAI Audio/Whisper atual e endpoints personalizados.
+
+A prioridade de experiência para novas instalações deve ser Groq, porque o usuário deseja uma alternativa acessível sem depender de conta paga da OpenAI.
+
+Não confundir Groq com Grok. O provedor é **Groq**.
+
+## 4.2 Modelos oficiais
+
+Os dois modelos a oferecer são:
+
+1. `whisper-large-v3-turbo` — padrão recomendado: mais rápido e com melhor relação custo/desempenho.
+2. `whisper-large-v3` — alternativa para priorizar precisão.
+
+Ambos são multilíngues e aceitam português.
+
+Endpoint oficial compatível com OpenAI:
+
+`https://api.groq.com/openai/v1/audio/transcriptions`
+
+A requisição é multipart/form-data e deve conter:
+
+- `file`;
+- `model`;
+- `language=pt` por padrão, permitindo alterar idioma;
+- `response_format=verbose_json`;
+- `temperature=0`, se aceito pelo endpoint.
+
+O formato `verbose_json` permite recuperar segmentos e timestamps, preservando a estrutura atual de `TranscriptionResult`.
+
+## 4.3 Chave e custo
+
+A chave da Groq deve ser fornecida pelo próprio usuário, criada na conta Groq dele.
+
+- Não embutir chave da Groq no aplicativo.
+- Não usar uma chave compartilhada do desenvolvedor.
+- Armazenar a chave cifrada usando o mecanismo atual com Android Keystore.
+- Nunca registrar a chave em logs, analytics, crash reports ou exportações de preferências.
+- Não enviar arquivos para a Groq antes de o usuário configurar a chave e iniciar a operação.
+
+**Não afirmar que o serviço é ilimitado ou permanentemente gratuito.** A Groq oferece limites para o plano gratuito, mas eles podem mudar e variam por conta/modelo. A documentação oficial atualmente informa limite de arquivo de 25 MB no plano gratuito e 100 MB no plano Developer. A documentação também publica preços por hora para os modelos; portanto, a disponibilidade gratuita significa uso dentro da cota do plano gratuito, não gratuidade ilimitada garantida.
+
+A interface deve avisar que:
+
+- é necessário criar uma chave pessoal gratuita na Groq;
+- o uso depende dos limites atuais da conta;
+- ao atingir limites, o serviço pode retornar HTTP 429;
+- o FolioNote não cobra pelo recurso nem fornece créditos;
+- o áudio será enviado à Groq para processamento quando o usuário solicitar a transcrição.
+
+## 4.4 Limite de duração por requisição
+
+Para respeitar o limite operacional de até 10 minutos por requisição informado pelo usuário, implementar limite de produto de **10 minutos por parte enviada**.
+
+Preferir partes de aproximadamente 9 minutos e 30 segundos, com pequena sobreposição entre segmentos para evitar perda de palavras nas junções. Não ultrapassar 10 minutos por parte.
+
+Também respeitar o limite de tamanho do plano gratuito documentado pela Groq (atualmente 25 MB por arquivo). Duração e tamanho são limites diferentes: um áudio de 10 minutos pode ultrapassar 25 MB dependendo do codec e bitrate.
+
+Não declarar que 10 minutos é um limite universal documentado pela Groq. É um limite operacional configurado no FolioNote a pedido do usuário, sujeito a revisão se o plano/conta do provedor tiver limites diferentes.
+
+## 4.5 Áudios e vídeos longos
+
+Implementar processamento por partes quando o arquivo ultrapassar o limite de duração:
+
+1. Ler metadados de mídia.
+2. Identificar faixa de áudio.
+3. Dividir em segmentos com duração abaixo de 10 minutos.
+4. Preservar pequena sobreposição para evitar cortar palavras.
+5. Enviar cada segmento sequencialmente, respeitando os limites de tamanho.
+6. Somar o deslocamento temporal de cada parte aos timestamps retornados.
+7. Remover duplicações causadas pela sobreposição ao concatenar o texto.
+8. Reunir segmentos em uma única transcrição coerente.
+9. Se alguma parte falhar, preservar as partes concluídas e informar exatamente qual trecho falhou.
+10. Permitir retentar apenas a parte que falhou, quando tecnicamente possível.
+
+Priorizar APIs nativas `MediaExtractor` / `MediaMuxer` para separar a faixa de áudio sem carregar o arquivo inteiro na RAM. Avaliar compatibilidade dos codecs/contêineres; se não for possível dividir um formato, explicar ao usuário e permitir seleção/conversão compatível, sem corromper o arquivo original.
+
+Se o arquivo exceder 25 MB, tentar uma conversão local eficiente para áudio mono com bitrate apropriado, se houver implementação leve e compatível. Não adicionar FFmpeg pesado sem justificar impacto. Se a conversão não for segura ou possível, informar o limite e orientar o usuário a escolher/compactar o arquivo.
+
+Não alterar o arquivo original. Usar arquivos temporários privados e removê-los ao final, inclusive em caso de falha/cancelamento.
+
+## 4.6 Rede, limites e erros
+
+- Executar fora da Main Thread.
+- Exibir progresso por etapa/parte.
+- Cancelar requisições corretamente.
+- Respeitar `Retry-After` quando presente.
+- Tratar HTTP 401 (chave inválida), 413 (arquivo grande), 422 (formato/parâmetro inválido), 429 (limite excedido), 5xx e falhas de rede.
+- Não repetir automaticamente uma requisição que possa gerar custo sem política clara.
+- Usar retry com backoff somente para falhas transitórias, sem loop infinito.
+- Não perder transcrições já concluídas.
+- Não enviar novamente partes já concluídas em uma retomada, quando houver estado persistido confiável.
+- Evitar registrar conteúdo sensível do áudio em logs.
+
+## 4.7 Interface de configurações
+
+Adicionar Groq como opção de provedor em **Configurações → OCR e Transcrição**.
+
+Ao selecionar Groq:
+
+- endpoint preenchido automaticamente;
+- seletor de modelo com os dois IDs oficiais;
+- `whisper-large-v3-turbo` selecionado por padrão;
+- idioma padrão `pt`;
+- campo de API key protegido/mascarado;
+- botão para salvar e remover chave;
+- explicação curta sobre a cota gratuita e o envio do áudio à Groq;
+- link para a página oficial de criação da chave Groq.
+
+Não exigir que o usuário digite manualmente o endpoint ou o nome do modelo para o caso comum. Manter configuração avançada apenas se já fizer parte do padrão atual do app.
+
+## 4.8 Migração de preferências
+
+Adicionar o novo provedor sem quebrar usuários existentes.
+
+- Preferências já salvas de OpenAI e endpoint personalizado devem continuar válidas.
+- Novas instalações podem iniciar com Groq e `whisper-large-v3-turbo` como padrão.
+- Não apagar chaves antigas.
+- Não sobrescrever endpoint/modelo customizado.
+- Garantir que `hasTranscriptionConfigured` considere corretamente o provedor Groq e sua chave.
+- Exportação/importação de preferências não pode expor a chave secreta.
+- Testar leitura de preferências antigas e novas.
+
+## 4.9 Testes de transcrição
+
+Criar testes para:
+
+- parsing de resposta JSON;
+- parsing de `verbose_json` com segmentos e timestamps;
+- idioma;
+- seleção dos dois modelos;
+- multipart com endpoint Groq;
+- chave cifrada/descriptografada;
+- 401, 413, 422, 429 e 5xx;
+- arquivo acima de 10 minutos;
+- arquivo acima de 25 MB;
+- vídeo com faixa de áudio;
+- vídeo sem faixa de áudio;
+- divisão e remontagem de timestamps;
+- sobreposição sem duplicação excessiva;
+- cancelamento;
+- falha de uma parte sem perder as outras;
+- preservação de configurações antigas;
+- API 24.
+
+---
+
+# 5. Privacidade, segurança e experiência geral
+
+1. Nenhuma chave de API pode ficar em texto puro no DataStore.
+2. Não colocar segredos no código, GitHub, logs ou arquivos de release.
+3. Não enviar conteúdo de cadernos, imagens ou áudio a provedores externos sem ação/configuração explícita do usuário.
+4. OCR local deve ser realmente local.
+5. Transcrição Groq é processamento remoto e deve ser claramente identificada como tal.
+6. Downloads de atualização devem ser validados antes da instalação.
+7. A instalação deve continuar sob controle do usuário e do Android.
+8. Operações demoradas não podem congelar a interface.
+9. Progresso deve refletir trabalho real, não animação falsa.
+10. Cancelamento deve limpar recursos temporários e preservar dados já processados.
+11. Mensagens de erro devem explicar o que ocorreu e qual ação é possível.
+12. Preservar acessibilidade, contraste, responsividade e padrões visuais existentes do FolioNote.
+13. Não mostrar informação técnica excessiva na interface comum.
+14. Não adicionar SDKs grandes ou serviços de background sem justificar custo de armazenamento, RAM, bateria e manutenção.
+
+---
+
+# 6. Plano de implementação sugerido
+
+Implementar em etapas pequenas, mantendo a branch compilável:
+
+### Etapa A — Auditoria de compatibilidade
+- inventariar dependências e APIs;
+- confirmar minSdk 24 em todas as variantes/módulos;
+- corrigir incompatibilidades sem elevar o minSdk;
+- preparar matriz CI API 24 e atual.
+
+### Etapa B — OCR local
+- adicionar ML Kit bundled;
+- implementar adaptador `OcrEngine`;
+- manter renderização PDF atual;
+- fazer OCR sequencial;
+- ajustar configurações para local por padrão;
+- preservar provedores externos opcionais;
+- adicionar testes.
+
+### Etapa C — Groq Whisper
+- adicionar enum/configuração Groq;
+- definir defaults;
+- implementar requisição multipart e parsing;
+- implementar limites, segmentação e remontagem;
+- ajustar UI e mensagens;
+- adicionar testes.
+
+### Etapa D — Atualizador interno
+- definir contrato do release-manifest;
+- criar serviço de consulta GitHub;
+- criar comparação de versões;
+- criar download observável/cancelável;
+- validar hash, pacote, versão e certificado;
+- integrar FileProvider e instalador Android;
+- tratar APIs 24–25 e 26+;
+- criar modal completo e testes.
+
+### Etapa E — CI e validação
+- executar testes unitários;
+- executar lint;
+- compilar debug;
+- compilar release sem publicar, quando houver assinatura configurada;
+- executar testes instrumentados API 24 e Android atual;
+- verificar instalação/atualização com mesma assinatura;
+- verificar que APK com assinatura diferente é rejeitado;
+- verificar que nenhuma release foi publicada automaticamente durante testes.
+
+Não misturar a implementação dessas etapas em um único arquivo ou uma mudança gigantesca. Separar classes, serviços, estados e testes.
+
+---
+
+# 7. Critérios de aceite
+
+A fase só será considerada concluída quando todos os itens aplicáveis forem demonstrados:
+
+- [ ] minSdk permanece 24 e não há dependência incompatível;
+- [ ] app instala e abre em API 24;
+- [ ] recursos principais funcionam em API 24;
+- [ ] CI executa testes/build para API 24 e versão atual;
+- [ ] OCR local reconhece texto em imagem;
+- [ ] OCR local reconhece páginas de PDF digitalizado;
+- [ ] OCR local funciona sem internet e sem chave;
+- [ ] OCR local não envia documentos pela rede;
+- [ ] provedores OCR externos antigos continuam opcionais e funcionais;
+- [ ] Groq aparece como provedor de transcrição;
+- [ ] os dois modelos Whisper são selecionáveis;
+- [ ] Groq usa chave própria do usuário e armazenamento cifrado;
+- [ ] limite de 10 minutos por parte é respeitado;
+- [ ] limite de 25 MB do plano gratuito é validado;
+- [ ] áudio/vídeo longo é segmentado e remontado corretamente;
+- [ ] timestamps finais são coerentes;
+- [ ] atualizador consulta releases publicados do repositório oficial;
+- [ ] popup mostra versão, release notes e estado;
+- [ ] download apresenta progresso real e pode ser cancelado;
+- [ ] APK é verificado antes da instalação;
+- [ ] package name, versionCode e certificado são validados;
+- [ ] fluxo de permissão funciona em API 24–25 e API 26+;
+- [ ] instalador Android recebe APK via FileProvider;
+- [ ] instalação não é silenciosa nem tenta contornar proteções do Android;
+- [ ] releases de produção continuam exigindo assinatura válida;
+- [ ] nenhuma chave/segredo foi exposto;
+- [ ] nenhuma regressão foi introduzida nos requisitos da especificação anterior.
+
+---
+
+# 8. Relatório de entrega obrigatório
+
+Ao concluir cada etapa, entregar relatório factual com:
+
+1. arquivos criados e modificados;
+2. decisões de arquitetura;
+3. dependências adicionadas e impacto estimado no APK;
+4. compatibilidade Android verificada;
+5. testes executados e resultados reais;
+6. testes que não puderam ser executados e motivo;
+7. limitações do plano gratuito Groq e comportamento em rate limit;
+8. segurança do atualizador e assinatura;
+9. pendências;
+10. commit/hash sincronizado com GitHub.
+
+Não declarar a fase concluída se houver critério de aceite pendente. Não gerar APK de release nem publicar release nesta fase sem autorização posterior.
+
+---
+
+# 9. Referências oficiais
+
+## Android
+- Android 7.0 behavior changes: https://developer.android.com/about/versions/nougat/android-7.0-changes
+- PackageManager / canRequestPackageInstalls: https://developer.android.com/reference/android/content/pm/PackageManager
+- PackageInstaller: https://developer.android.com/reference/android/content/pm/PackageInstaller
+- Android target SDK behavior: https://developer.android.com/google/play/requirements/target-sdk
+
+## ML Kit OCR
+- Text Recognition v2 Android: https://developers.google.com/ml-kit/vision/text-recognition/v2/android
+- ML Kit model installation paths: https://developers.google.com/ml-kit/tips/installation-paths
+- ML Kit guides: https://developers.google.com/ml-kit/guides
+
+## Groq Whisper
+- Speech to Text: https://console.groq.com/docs/speech-to-text
+- Rate limits: https://console.groq.com/docs/rate-limits
+- API reference: https://console.groq.com/docs/api-reference
+- Whisper Large V3: https://console.groq.com/docs/model/whisper-large-v3
+- Whisper Large V3 Turbo: https://console.groq.com/docs/model/whisper-large-v3-turbo
+
+## GitHub Releases
+- REST API — Releases: https://docs.github.com/en/rest/releases/releases
+- REST API — Release assets: https://docs.github.com/en/rest/releases/assets
