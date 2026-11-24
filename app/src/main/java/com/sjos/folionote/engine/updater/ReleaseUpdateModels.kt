@@ -105,7 +105,13 @@ data class ReleaseManifest(
             }
 
             val tag = obj.optString("tag").trim()
+            require(tag.matches(Regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+$"))) {
+                "Manifesto inválido: tag sem versão semântica. "
+            }
             val releaseUrl = obj.optString("releaseUrl").trim()
+            require(releaseUrl.startsWith("https://github.com/", ignoreCase = true)) {
+                "Manifesto inválido: URL oficial do release ausente ou inválida."
+            }
 
             ReleaseManifest(
                 packageName = pkg,

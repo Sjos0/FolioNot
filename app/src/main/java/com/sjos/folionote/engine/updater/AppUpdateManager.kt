@@ -81,6 +81,14 @@ class AppUpdateManager(
 
     fun getInstalledVersionInfo(): InstalledAppVersionInfo = apkVerifier.getInstalledAppInfo()
 
+    fun checkForUpdatesAutomatically() {
+        scope.launch {
+            if (releaseService.isAutomaticCheckDue()) {
+                checkForUpdates()
+            }
+        }
+    }
+
     fun checkForUpdates() {
         val currentState = _uiState.value
         if (currentState is UpdateUiState.Checking ||

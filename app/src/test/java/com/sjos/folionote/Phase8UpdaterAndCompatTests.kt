@@ -23,6 +23,7 @@ import com.sjos.folionote.engine.updater.AndroidApkSignatureVerifier
 import com.sjos.folionote.engine.updater.ApkVerifier
 import com.sjos.folionote.engine.updater.AppUpdateManager
 import com.sjos.folionote.engine.updater.GitHubReleaseService
+import com.sjos.folionote.engine.updater.shouldRunAutomaticReleaseCheck
 import com.sjos.folionote.engine.updater.InstalledAppVersionInfo
 import com.sjos.folionote.engine.updater.ReleaseCheckOutcome
 import com.sjos.folionote.engine.updater.ReleaseManifest
@@ -143,6 +144,15 @@ class Phase8ApiCompatMatrixTests {
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class Phase8UpdaterEngineTests {
+
+    @Test
+    fun `automatic update check is throttled to once per day`() {
+        val day = 24L * 60L * 60L * 1000L
+        assertTrue(shouldRunAutomaticReleaseCheck(lastCheckedAt = 0L, now = day))
+        assertFalse(shouldRunAutomaticReleaseCheck(lastCheckedAt = day, now = day + day - 1L))
+        assertTrue(shouldRunAutomaticReleaseCheck(lastCheckedAt = day, now = day + day))
+        assertTrue(shouldRunAutomaticReleaseCheck(lastCheckedAt = day + 1L, now = day))
+    }
 
     private fun startUpdaterServer(
         handler: (path: String, reqHeaders: Map<String, String>) -> Triple<Int, Map<String, String>, ByteArray>

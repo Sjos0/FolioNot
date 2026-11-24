@@ -64,7 +64,15 @@ jobs:
               exit 1
             fi
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-            VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
+            if (( MINOR > 999 || PATCH > 999 )); then
+              echo "Minor and patch components must be between 0 and 999."
+              exit 1
+            fi
+            VERSION_CODE=$((200000000 + MAJOR * 1000000 + MINOR * 1000 + PATCH))
+            if (( VERSION_CODE > 2100000000 )); then
+              echo "Version code exceeds Android maximum (2100000000)."
+              exit 1
+            fi
           else
             VERSION="0.0.0-dev.${GITHUB_RUN_NUMBER}"
             VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
@@ -74,7 +82,7 @@ jobs:
 
       - name: Run unit tests (API 24..36 matrix) and build debug APK
         run: |
-          ./gradlew --no-daemon testDebugUnitTest assembleDebug \
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug \
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 

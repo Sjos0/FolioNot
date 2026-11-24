@@ -73,7 +73,7 @@ class AppContainer(app: Application) {
         preferencesStore = preferencesStore,
         cryptoManager = cryptoManager,
         baseHttpClient = okHttpClient,
-        metadataReader = mediaMetadataReader
+        mediaMetadataReader = mediaMetadataReader
     )
     val documentExtractor = DocumentExtractor(
         ocrEngine = ocrEngine,
@@ -179,6 +179,7 @@ class FolioNoteApp : Application() {
         appScope.launch {
             container.database.toolAndJobDao().upsertTools(ToolEngine.builtInTools())
             container.pipelineManager.recoverInterruptedJobs()
+            container.appUpdateManager.checkForUpdatesAutomatically()
         }
     }
 }

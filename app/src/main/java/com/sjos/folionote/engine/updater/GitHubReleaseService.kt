@@ -12,6 +12,12 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+internal fun shouldRunAutomaticReleaseCheck(
+    lastCheckedAt: Long,
+    now: Long,
+    intervalMs: Long = 24L * 60L * 60L * 1000L
+): Boolean = lastCheckedAt <= 0L || now < lastCheckedAt || now - lastCheckedAt >= intervalMs
+
 class GitHubReleaseService(
     private val baseHttpClient: OkHttpClient = OkHttpClient(),
     private val preferencesStore: AppPreferencesStore? = null,
@@ -20,6 +26,11 @@ class GitHubReleaseService(
     private val allowLocalhostForTests: Boolean = false,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
+
+    suspend fun isAutomaticCheckDue(): Boolean {
+        val lastCheckedAt = preferencesStore?.getReleaseCheckCache()?.lastCheckedAt ?: 0L
+        return shouldRunAutomaticReleaseCheck(lastCheckedAt, nowProvider())
+    }
 
     suspend fun checkForUpdates(installedInfo: InstalledAppVersionInfo): Result<ReleaseCheckOutcome> =
         withContext(Dispatchers.IO) {
@@ -45,19 +56,27 @@ class GitHubReleaseService(
                         304 -> {
                             val cachedBody = cached?.cachedJson
                                 ?: throw IllegalStateException("Cache ETag vazio ao consultar GitHub.")
+                            preferencesStore?.saveReleaseCheckCache(cached.etag, cached.cachedJson, nowProvider())
                             parseGitHubReleaseJson(cachedBody, cached.etag).getOrThrow()
                         }
-                        404 -> throw IllegalStateException(
-                            "Nenhuma versão publicada encontrada no repositório oficial (${UpdaterContract.GITHUB_OWNER}/${UpdaterContract.GITHUB_REPO})."
-                        )
+                        404 -> {
+                            preferencesStore?.saveReleaseCheckCache(null, null, nowProvider())
+                            throw IllegalStateException(
+                                "Nenhuma versão publicada encontrada no repositório oficial (${UpdaterContract.GITHUB_OWNER}/${UpdaterContract.GITHUB_REPO})."
+                            )
+                        }
                         403, 429 -> {
+                            preferencesStore?.saveReleaseCheckCache(cached?.etag, cached?.cachedJson, nowProvider())
                             val retryAfter = resp.header("Retry-After")?.toLongOrNull()
                             val suffix = if (retryAfter != null) " Tente novamente em ${retryAfter}s." else " Aguarde alguns minutos."
                             throw IllegalStateException("Limite de consultas à API do GitHub atingido (HTTP ${resp.code}).$suffix")
                         }
-                        in 500..599 -> throw IllegalStateException(
-                            "Servidor do GitHub temporariamente indisponível (HTTP ${resp.code})."
-                        )
+                        in 500..599 -> {
+                            preferencesStore?.saveReleaseCheckCache(cached?.etag, cached?.cachedJson, nowProvider())
+                            throw IllegalStateException(
+                                "Servidor do GitHub temporariamente indisponível (HTTP ${resp.code})."
+                            )
+                        }
                         !in 200..299 -> throw IllegalStateException(
                             "Resposta inesperada do GitHub ao buscar atualizações (HTTP ${resp.code})."
                         )
@@ -91,6 +110,12 @@ class GitHubReleaseService(
                 validateAssetDownloadUrl(manifestAsset.browserDownloadUrl)
                 val manifestRaw = fetchTextAsset(client, manifestAsset.browserDownloadUrl, installedInfo.versionName)
                 val manifest = ReleaseManifest.parseAndValidate(manifestRaw).getOrThrow()
+                require(manifest.tag == payload.tagName) {
+                    "Manifesto rejeitado: tag (${manifest.tag}) diverge do release consultado (${payload.tagName})."
+                }
+                require(manifest.releaseUrl == payload.htmlUrl) {
+                    "Manifesto rejeitado: URL do release diverge da URL oficial retornada pelo GitHub."
+                }
 
                 val apkAsset = resolveApkAsset(payload.assets, manifest)
                 validateAssetDownloadUrl(apkAsset.browserDownloadUrl)

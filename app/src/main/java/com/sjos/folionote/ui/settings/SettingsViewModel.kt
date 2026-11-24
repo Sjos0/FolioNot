@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -61,6 +62,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val showUpdateDialog = MutableStateFlow(false)
     private val statusMessage = MutableStateFlow<String?>(null)
     private val installedInfo by lazy { updateManager.getInstalledVersionInfo() }
+
+    init {
+        viewModelScope.launch {
+            updateManager.uiState.collect { state ->
+                if (state is UpdateUiState.UpdateAvailable) {
+                    showUpdateDialog.value = true
+                }
+            }
+        }
+    }
+
 
     private data class CoreMetaBundle(
         val settings: AppSettings,

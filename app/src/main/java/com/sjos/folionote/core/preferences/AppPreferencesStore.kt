@@ -346,7 +346,11 @@ class AppPreferencesStore(private val context: Context) {
     suspend fun saveReleaseCheckCache(etag: String?, cachedJson: String?, checkedAt: Long) {
         context.dataStore.edit { prefs ->
             if (!etag.isNullOrBlank()) prefs[Keys.UPDATER_ETAG] = etag else prefs.remove(Keys.UPDATER_ETAG)
-            if (!cachedJson.isNullOrBlank()) prefs[Keys.UPDATER_CACHED_JSON] = cachedJson
+            if (!cachedJson.isNullOrBlank()) {
+                prefs[Keys.UPDATER_CACHED_JSON] = cachedJson
+            } else {
+                prefs.remove(Keys.UPDATER_CACHED_JSON)
+            }
             prefs[Keys.UPDATER_LAST_CHECK_AT] = checkedAt
         }
     }
