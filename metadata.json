@@ -1,0 +1,6 @@
+{
+  "name": "FolioNote",
+  "description": "Local-first personal knowledge and universal OpenAI-compatible AI notebook app for Android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

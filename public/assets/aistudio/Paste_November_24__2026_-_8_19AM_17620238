@@ -1,0 +1,814 @@
+PRD — Aplicativo Android de Conhecimento e IA
+
+Versão: 1.0
+Status: Especificação inicial para desenvolvimento
+Plataforma: Android
+Tecnologia principal: Kotlin + Jetpack Compose
+Arquitetura: Local-first, modular e orientada a provedores
+Referência visual: Capturas de tela do NotebookLM fornecidas pelo usuário
+
+---
+
+1. Visão do produto
+
+Desenvolver um aplicativo Android de conhecimento pessoal inspirado na experiência do NotebookLM, mas com maior liberdade de organização, personalização e escolha de modelos de inteligência artificial.
+
+O aplicativo permitirá que o usuário crie espaços de conhecimento (notebooks), adicione documentos e fontes, faça perguntas sobre esse conteúdo, receba respostas fundamentadas em citações e converse com modelos generativos de diferentes provedores.
+
+O produto não deverá ficar preso a um único fornecedor de IA. Seu principal diferencial técnico será um sistema universal de integração com modelos generativos, priorizando APIs compatíveis com o padrão OpenAI Chat Completions.
+
+O usuário deverá poder cadastrar quantos provedores e modelos desejar, descobrir modelos disponíveis por meio do endpoint "/models" e configurar individualmente os limites de contexto e geração.
+
+1.1 Objetivos principais
+
+1. Oferecer uma experiência de organização e consulta de conhecimento semelhante à do NotebookLM.
+2. Permitir notebooks e fontes sem impor limites artificiais de quantidade.
+3. Disponibilizar um chat universal que funcione com diferentes provedores.
+4. Priorizar compatibilidade com "POST /chat/completions".
+5. Permitir descoberta de modelos por "GET /models".
+6. Permitir cadastro manual de modelos e provedores personalizados.
+7. Controlar dinamicamente o contexto enviado ao modelo.
+8. Suportar chamadas de ferramentas (tool calling/function calling).
+9. Manter documentos, conversas, configurações e índices preferencialmente no dispositivo.
+10. Separar processamento de documentos da capacidade do modelo generativo.
+
+1.2 Fora do objetivo inicial
+
+- Criar um modelo generativo próprio.
+- Exigir que os modelos tenham visão ou processamento nativo de imagens.
+- Exigir que todos os modelos tenham ferramentas disponíveis.
+- Depender exclusivamente de Gemini, OpenAI ou Anthropic.
+- Exigir conexão permanente para consultar documentos já importados.
+- Reproduzir a marca ou identidade visual do NotebookLM.
+
+---
+
+2. Princípios fundamentais
+
+2.1 Local-first
+
+O dispositivo é o ambiente principal de armazenamento e gerenciamento.
+
+Devem permanecer localmente, sempre que possível:
+
+- Notebooks.
+- Documentos e arquivos importados.
+- Texto extraído dos documentos.
+- Fragmentos (chunks).
+- Embeddings.
+- Histórico de conversas.
+- Resumos de contexto.
+- Configurações de provedores e modelos.
+- Metadados e citações.
+
+Serviços externos serão utilizados quando necessários para embeddings, geração de respostas ou outras operações remotas.
+
+2.2 Independência de provedores
+
+A aplicação não poderá depender diretamente de uma implementação específica de Gemini, GPT ou Claude.
+
+Deverá existir uma camada de abstração capaz de conectar diferentes serviços e endpoints.
+
+2.3 Modelo generativo não precisa ter visão
+
+A aplicação será responsável pela ingestão e interpretação dos documentos.
+
+Ela deverá extrair texto, processar arquivos, executar OCR quando necessário, segmentar conteúdo, indexar e recuperar informações.
+
+O modelo generativo receberá o conteúdo textual relevante já preparado pela aplicação.
+
+Portanto, a capacidade de visão não será um requisito para cadastrar um modelo.
+
+2.4 Configuração controlada pelo usuário
+
+O usuário poderá definir os limites e capacidades de cada modelo, sem depender exclusivamente das informações fornecidas pelo endpoint "/models".
+
+---
+
+3. Arquitetura de integração com IA
+
+Esta é uma das partes mais importantes do produto.
+
+3.1 Padrão principal: OpenAI-compatible Chat Completions
+
+O aplicativo deverá priorizar provedores que implementem uma API compatível com o padrão OpenAI Chat Completions.
+
+Operação principal:
+
+"POST /chat/completions"
+
+Descoberta de modelos:
+
+"GET /models"
+
+O aplicativo deverá permitir configurar:
+
+- Nome do provedor.
+- URL-base da API.
+- Caminho personalizado do endpoint de chat.
+- Caminho personalizado do endpoint de modelos.
+- Chave de API.
+- Headers HTTP adicionais.
+- Prefixos ou configurações específicas de autenticação.
+- Modelo padrão do provedor.
+- Timeout.
+- Configuração de streaming.
+- Parâmetros adicionais da requisição, quando suportados.
+
+A URL-base e os caminhos deverão ser configuráveis, pois nem todos os serviços hospedam suas APIs da mesma maneira.
+
+O sistema deverá evitar assumir que todos os provedores usam exatamente a mesma URL.
+
+3.2 Gerenciamento de provedores
+
+Criar uma tela de gerenciamento de provedores.
+
+O usuário poderá:
+
+1. Adicionar um provedor.
+2. Editar suas configurações.
+3. Testar a conexão.
+4. Consultar os modelos disponíveis.
+5. Adicionar modelos à biblioteca.
+6. Definir um modelo padrão.
+7. Desativar ou excluir um provedor.
+8. Duplicar uma configuração para criar outra semelhante.
+
+Não deverá existir um limite artificial de provedores cadastrados.
+
+3.3 Descoberta de modelos — "/models"
+
+O aplicativo deverá oferecer uma ação chamada Buscar modelos.
+
+Ao acioná-la:
+
+1. O aplicativo utiliza a URL, autenticação e headers configurados.
+2. Faz uma requisição HTTP GET ao endpoint "/models" configurado.
+3. Interpreta a resposta.
+4. Extrai os identificadores dos modelos disponíveis.
+5. Apresenta os resultados ao usuário.
+6. Permite selecionar um ou vários modelos.
+7. Adiciona os selecionados à biblioteca local de modelos.
+
+A implementação deverá tolerar variações de resposta entre provedores compatíveis.
+
+O endpoint pode retornar apenas identificadores e metadados básicos. Portanto, não se deve presumir que ele informe corretamente o tamanho de contexto, limite de saída ou suporte a ferramentas.
+
+Esses dados deverão ser editáveis manualmente.
+
+Requisitos adicionais
+
+- Botão para atualizar a lista.
+- Indicador de carregamento.
+- Mensagem clara de erro de autenticação ou conexão.
+- Tratamento de respostas vazias.
+- Deduplicação de modelos pelo identificador dentro do provedor.
+- Preservação das configurações personalizadas quando a lista for atualizada.
+- Possibilidade de adicionar um modelo manualmente mesmo que ele não apareça em "/models".
+
+3.4 Biblioteca de modelos
+
+Os modelos deverão ser armazenados como entidades independentes dos provedores.
+
+Um modelo deverá possuir, no mínimo:
+
+Campo| Descrição
+ID interno| Identificador local único
+Provider ID| Provedor ao qual pertence
+Model ID| Identificador usado na API
+Nome de exibição| Nome amigável
+Context window| Limite máximo de contexto
+Max output tokens| Limite de geração
+Supports streaming| Suporte a respostas em streaming
+Supports tools| Suporte a tool calling
+Supports system message| Suporte a mensagens de sistema
+Enabled| Modelo habilitado ou desabilitado
+Custom parameters| Parâmetros adicionais
+
+Também deverá ser possível configurar:
+
+- Temperatura.
+- Top P.
+- Penalidades, quando suportadas.
+- Limite de saída.
+- Parâmetros específicos do provedor.
+- Capacidades conhecidas.
+- Observações do usuário.
+
+O aplicativo deverá aceitar qualquer quantidade de modelos cadastrados, respeitando apenas os recursos disponíveis no dispositivo.
+
+3.5 Limites de contexto e geração
+
+O usuário deverá conseguir configurar individualmente:
+
+- Context window: quantidade máxima de tokens de contexto.
+- Max output tokens: quantidade máxima de tokens de resposta.
+
+Esses valores deverão ser armazenados por modelo.
+
+O Context Engine deverá respeitar os limites configurados antes de montar a requisição.
+
+Não deverá ser necessário que o modelo informe esses limites automaticamente.
+
+O sistema poderá apresentar valores detectados ou sugeridos, mas o usuário deverá poder alterá-los.
+
+Importante: context window e max output tokens são conceitos diferentes. O aplicativo deverá reservar espaço para a resposta, instruções, mensagens, ferramentas e conteúdo recuperado.
+
+3.6 Capacidades mínimas exigidas
+
+O aplicativo deverá ser capaz de trabalhar com modelos que:
+
+- Recebam mensagens textuais.
+- Produzam respostas textuais.
+- Compreendam instruções.
+- Consigam interpretar contexto extenso, conforme seus limites.
+- Possuam suporte a ferramentas quando essa capacidade for necessária.
+
+Não exigir:
+
+- Visão computacional.
+- Entrada de imagens.
+- Geração de imagens.
+- Áudio nativo.
+- Vídeo nativo.
+
+O suporte a ferramentas deverá ser uma capacidade configurável, pois nem todo modelo ou endpoint compatível implementa tool calling da mesma forma.
+
+3.7 Tool calling
+
+O sistema deverá suportar chamadas de ferramentas quando o modelo e o endpoint oferecerem esse recurso.
+
+O fluxo esperado:
+
+1. O aplicativo envia a mensagem e as ferramentas disponíveis.
+2. O modelo retorna uma resposta textual ou uma solicitação de ferramenta.
+3. O aplicativo identifica a ferramenta solicitada.
+4. Valida os argumentos.
+5. Executa a ferramenta autorizada.
+6. Envia o resultado de volta ao modelo.
+7. O modelo produz a resposta final.
+
+O aplicativo deverá controlar as permissões das ferramentas.
+
+Ferramentas que alterem ou excluam dados, enviem informações externas ou realizem operações sensíveis deverão exigir autorização apropriada.
+
+Não executar chamadas de ferramentas apenas porque o modelo as solicitou: a aplicação sempre será responsável pela validação e execução.
+
+3.8 Streaming
+
+O chat deverá oferecer respostas progressivas sempre que o provedor suportar streaming.
+
+Preferencialmente, implementar compatibilidade com Server-Sent Events (SSE), incluindo:
+
+- Exibição progressiva do texto.
+- Cancelamento da geração.
+- Tratamento de interrupções.
+- Reconexão ou encerramento controlado.
+- Separação entre conteúdo textual e eventos de tool calling.
+
+Se o provedor não oferecer streaming, o aplicativo deverá utilizar resposta convencional sem quebrar a experiência.
+
+3.9 Adaptadores adicionais
+
+O padrão OpenAI Chat Completions será o contrato principal.
+
+A arquitetura poderá oferecer adaptadores nativos adicionais para provedores que não sejam plenamente compatíveis ou que possuam recursos específicos.
+
+Exemplos de provedores que poderão ser suportados:
+
+- OpenAI.
+- Anthropic.
+- Google Gemini.
+- OpenRouter.
+- Groq.
+- Together AI.
+- DeepSeek.
+- Mistral.
+- Serviços locais.
+- Endpoints personalizados e compatíveis com OpenAI.
+
+A lista é ilustrativa, não uma limitação.
+
+O objetivo é permitir que novos provedores sejam adicionados sem reescrever o chat ou o mecanismo de contexto.
+
+---
+
+4. Experiência principal do aplicativo
+
+4.1 Tela inicial
+
+A tela inicial deverá apresentar:
+
+- Identidade visual do aplicativo.
+- Acesso aos notebooks.
+- Busca global.
+- Botão para criar notebook.
+- Acesso às conversas recentes.
+- Configurações.
+- Gerenciamento de modelos e provedores.
+
+A organização visual deverá ser inspirada nas capturas do NotebookLM anexadas pelo usuário.
+
+As imagens serão referências de estilo, hierarquia, espaçamento e disposição dos elementos. Não deverão ser copiadas como uma reprodução literal da marca.
+
+4.2 Notebooks
+
+O usuário poderá criar notebooks independentes.
+
+Cada notebook terá:
+
+- Nome.
+- Descrição opcional.
+- Ícone ou identificação visual.
+- Lista de fontes.
+- Conversas associadas.
+- Data de criação.
+- Última atualização.
+
+Não impor limites artificiais de notebooks ou fontes no produto.
+
+A aplicação deverá gerenciar o consumo de armazenamento e informar o usuário quando houver limitações reais do dispositivo.
+
+4.3 Fontes
+
+O usuário poderá importar fontes para cada notebook.
+
+Formatos previstos:
+
+MVP:
+
+- PDF com texto.
+- TXT.
+- Markdown.
+- DOCX.
+
+Evolução:
+
+- PDF digitalizado.
+- Imagens.
+- PPTX.
+- EPUB.
+- Áudio.
+- Vídeo.
+- Páginas da web.
+
+Cada fonte deverá possuir:
+
+- Nome.
+- Tipo.
+- Tamanho.
+- Data de importação.
+- Status de processamento.
+- Texto extraído.
+- Metadados.
+- Hash do arquivo.
+- Identificação de páginas e posições.
+- Status de indexação.
+
+O processamento deverá acontecer em segundo plano quando necessário.
+
+4.4 Chat do notebook
+
+Cada notebook deverá possuir uma área de chat.
+
+O usuário poderá:
+
+- Fazer perguntas sobre as fontes.
+- Conversar com o modelo selecionado.
+- Alternar entre modelos disponíveis.
+- Consultar citações.
+- Copiar respostas.
+- Regenerar respostas.
+- Interromper gerações.
+- Consultar o histórico.
+- Iniciar novas conversas.
+
+As respostas fundamentadas nos documentos deverão apresentar referências às fontes utilizadas.
+
+Quando não houver evidência suficiente, o sistema deverá informar isso em vez de inventar informações.
+
+4.5 Seleção de modelo no chat
+
+O chat deverá apresentar um seletor de modelo acessível.
+
+O usuário poderá escolher qualquer modelo habilitado na biblioteca.
+
+O modelo escolhido deverá ser utilizado na conversa sem exigir que o notebook seja recriado ou reindexado.
+
+A troca de modelo generativo não deverá modificar os embeddings existentes.
+
+---
+
+5. Motor de documentos e conhecimento
+
+O aplicativo deverá possuir uma arquitetura independente da capacidade multimodal dos modelos generativos.
+
+5.1 Pipeline de documentos
+
+Fluxo:
+
+1. Importação.
+2. Identificação do formato.
+3. Extração de conteúdo.
+4. OCR quando necessário.
+5. Normalização.
+6. Segmentação em chunks.
+7. Geração de embeddings.
+8. Armazenamento.
+9. Indexação.
+10. Disponibilização para recuperação.
+
+5.2 Chunking
+
+A segmentação deverá respeitar a estrutura do documento.
+
+Priorizar:
+
+- Títulos.
+- Subtítulos.
+- Parágrafos.
+- Listas.
+- Tabelas.
+- Seções.
+- Limites de páginas.
+
+O tamanho dos chunks e a sobreposição deverão ser configuráveis e testáveis.
+
+Cada chunk deverá preservar sua origem para que as respostas possam apontar para a página ou seção correta.
+
+5.3 Embeddings
+
+Criar uma interface independente para provedores de embeddings.
+
+O Gemini Embedding 2 poderá ser utilizado como uma das opções, mas não deverá estar acoplado ao sistema inteiro.
+
+A aplicação deverá permitir trocar o provedor de embeddings futuramente.
+
+Cada índice deverá registrar o modelo e a dimensão usados para gerar seus vetores.
+
+Não misturar embeddings incompatíveis em uma mesma coleção sem uma estratégia explícita de migração.
+
+5.4 Recuperação RAG
+
+Implementar recuperação híbrida:
+
+- Busca lexical.
+- Busca semântica.
+- Filtros por notebook e fonte.
+- Fusão de rankings.
+- Reranking opcional.
+- Seleção de trechos relevantes.
+
+O objetivo é enviar ao modelo somente os trechos necessários para responder à pergunta.
+
+Não enviar todos os documentos em cada mensagem.
+
+5.5 Citações
+
+Cada trecho recuperado deverá possuir referência à fonte original.
+
+As citações deverão permitir identificar:
+
+- Documento.
+- Página.
+- Seção.
+- Posição ou intervalo do texto.
+
+O usuário deverá conseguir abrir a fonte correspondente a partir da citação, quando tecnicamente possível.
+
+---
+
+6. Context Engine — gerenciamento inteligente de contexto
+
+O aplicativo deverá ter um módulo responsável por decidir quais informações serão enviadas ao modelo.
+
+Ele não deverá simplesmente anexar todo o histórico e todos os documentos.
+
+Deverá considerar:
+
+1. Instruções do sistema.
+2. Configurações da conversa.
+3. Resumo acumulado do histórico.
+4. Mensagens recentes relevantes.
+5. Pergunta atual.
+6. Trechos recuperados pelo RAG.
+7. Definições e resultados de ferramentas.
+8. Limite de contexto do modelo.
+9. Reserva para tokens de saída.
+10. Margem de segurança.
+
+O sistema deverá calcular o orçamento disponível antes de montar a requisição.
+
+Comportamentos esperados
+
+- Resumo progressivo de conversas longas.
+- Recuperação de mensagens antigas sob demanda.
+- Preservação do histórico original no armazenamento local.
+- Redução inteligente de contexto quando necessário.
+- Priorização de informações relevantes.
+- Evitar duplicação de trechos.
+- Respeitar o limite de saída configurado.
+- Informar quando o contexto não puder ser acomodado.
+
+O resumo não deverá apagar o histórico original.
+
+---
+
+7. Arquitetura técnica Android
+
+7.1 Stack
+
+- Kotlin.
+- Jetpack Compose.
+- Android Architecture Components.
+- ViewModel.
+- StateFlow.
+- Coroutines.
+- Room/SQLite.
+- DataStore.
+- WorkManager.
+- OkHttp ou Retrofit.
+- Storage Access Framework.
+
+A arquitetura deverá ser modular, testável e preparada para expansão.
+
+7.2 Módulos lógicos
+
+- Presentation: telas e componentes.
+- Domain: regras de negócio.
+- Data: persistência e repositórios.
+- Document Engine: leitura e extração.
+- Indexing Engine: chunking e embeddings.
+- Retrieval Engine: busca e recuperação.
+- Context Engine: orçamento e montagem do contexto.
+- AI Provider Manager: provedores e modelos.
+- Tool Engine: registro, permissões e execução de ferramentas.
+- Core/Orchestration: coordenação dos fluxos.
+
+7.3 Persistência
+
+Utilizar Room/SQLite para dados estruturados.
+
+Entidades iniciais:
+
+- Notebook.
+- Source.
+- DocumentChunk.
+- Embedding.
+- Provider.
+- Model.
+- Conversation.
+- Message.
+- Citation.
+- ToolDefinition.
+- ProcessingJob.
+
+Os documentos originais deverão ficar em armazenamento privado gerenciado pelo aplicativo, com metadados no banco.
+
+7.4 Processamento em segundo plano
+
+Usar WorkManager para:
+
+- Importação.
+- Extração.
+- OCR.
+- Chunking.
+- Embeddings.
+- Indexação.
+- Reprocessamento.
+- Recuperação após interrupções.
+
+O processamento deverá possuir status, progresso, cancelamento e tratamento de falhas.
+
+---
+
+8. Segurança e privacidade
+
+- Armazenar documentos no espaço privado do aplicativo.
+- Não registrar chaves de API em logs.
+- Proteger credenciais usando mecanismos apropriados do Android, como Android Keystore.
+- Utilizar HTTPS.
+- Permitir excluir credenciais.
+- Não enviar documentos completos sem necessidade.
+- Enviar somente os trechos necessários ao provedor de IA.
+- Informar ao usuário quando dados forem enviados para serviços externos.
+- Separar credenciais de cada provedor.
+- Validar respostas e argumentos de ferramentas.
+
+A arquitetura deverá permitir futuramente um backend seguro para proteger credenciais em cenários de distribuição pública.
+
+---
+
+9. Funcionamento offline
+
+O aplicativo deverá continuar útil sem conexão.
+
+Disponível offline:
+
+- Abrir notebooks.
+- Ler fontes importadas.
+- Consultar histórico.
+- Buscar lexicalmente no conteúdo.
+- Gerenciar documentos.
+- Visualizar citações já registradas.
+
+Recursos que dependem de serviços remotos:
+
+- Embeddings gerados por APIs externas.
+- Chat com modelos na nuvem.
+- Atualização de modelos pelo endpoint "/models".
+
+Busca semântica e chat offline poderão ser adicionados por meio de modelos locais em uma fase futura.
+
+---
+
+10. Diretrizes de interface e experiência visual
+
+As capturas de tela do NotebookLM anexadas pelo usuário deverão orientar a composição visual do aplicativo.
+
+Priorizar:
+
+- Interface limpa.
+- Hierarquia visual clara.
+- Boa utilização do espaço.
+- Navegação intuitiva.
+- Tipografia legível.
+- Componentes consistentes.
+- Cards e listas organizados.
+- Áreas de chat confortáveis.
+- Seletor de modelos acessível.
+- Configurações sem excesso de complexidade.
+
+O desenvolvimento deverá considerar telas Android de diferentes dimensões, especialmente dispositivos móveis.
+
+Não criar uma interface desktop reduzida para celular. A experiência deverá ser pensada para toque, navegação mobile e telas menores.
+
+Antes de implementar as telas, analisar as imagens de referência e identificar:
+
+- Estrutura de navegação.
+- Distribuição dos elementos.
+- Relação entre cabeçalho e conteúdo.
+- Espaçamentos.
+- Hierarquia dos textos.
+- Estilo dos cards.
+- Comportamento visual do chat.
+- Elementos que precisam ser adaptados para Android.
+
+---
+
+11. Roadmap de desenvolvimento
+
+Fase 0 — Fundação
+
+- Criar projeto Android.
+- Configurar Kotlin e Compose.
+- Configurar arquitetura.
+- Criar navegação.
+- Configurar Room.
+- Definir tema e componentes visuais.
+
+Fase 1 — Notebooks e fontes
+
+- Criar notebooks.
+- Importar documentos.
+- Armazenar arquivos.
+- Extrair texto.
+- Exibir fontes.
+- Criar fila de processamento.
+
+Fase 2 — Provedores e modelos
+
+- Criar cadastro de provedores.
+- Implementar configuração de URL-base.
+- Implementar autenticação e headers.
+- Implementar descoberta "/models".
+- Implementar cadastro manual de modelos.
+- Criar biblioteca de modelos.
+- Configurar context window e max output tokens.
+- Testar conexões.
+
+Fase 3 — Chat universal
+
+- Implementar "POST /chat/completions".
+- Implementar mensagens e histórico.
+- Implementar streaming.
+- Implementar cancelamento.
+- Implementar seleção de modelo.
+- Implementar tratamento de erros.
+- Implementar suporte inicial a tool calling.
+
+Fase 4 — Indexação e RAG
+
+- Implementar chunking.
+- Implementar embeddings.
+- Implementar armazenamento vetorial.
+- Implementar busca lexical.
+- Implementar busca semântica.
+- Implementar recuperação híbrida.
+- Implementar citações.
+
+Fase 5 — Context Engine
+
+- Implementar orçamento de tokens.
+- Implementar resumos progressivos.
+- Implementar recuperação do histórico.
+- Integrar RAG ao chat.
+- Integrar resultados de ferramentas.
+- Testar conversas longas.
+
+Fase 6 — Offline e robustez
+
+- Busca lexical offline.
+- Leitura offline.
+- Recuperação de processamento interrompido.
+- Tratamento de falhas.
+- Otimização de armazenamento.
+- Testes de desempenho.
+
+Fase 7 — Evolução
+
+- OCR.
+- Mais formatos de documentos.
+- Embeddings alternativos.
+- Modelos locais.
+- Backup e sincronização opcional.
+- Recursos adicionais de conhecimento.
+
+---
+
+12. Critérios de aceitação do MVP
+
+O MVP será considerado funcional quando:
+
+1. O usuário conseguir criar notebooks.
+2. O usuário conseguir importar PDFs e arquivos de texto.
+3. O aplicativo conseguir extrair e armazenar o conteúdo.
+4. O usuário conseguir cadastrar um provedor OpenAI-compatible.
+5. O aplicativo conseguir testar a conexão.
+6. O aplicativo conseguir consultar "/models".
+7. O usuário conseguir adicionar modelos manualmente.
+8. O usuário conseguir configurar context window e max output tokens por modelo.
+9. O usuário conseguir enviar mensagens por "POST /chat/completions".
+10. O chat conseguir exibir respostas progressivamente quando houver suporte a streaming.
+11. O usuário conseguir trocar de modelo sem recriar o notebook.
+12. O aplicativo conseguir indexar fontes e recuperar trechos relevantes.
+13. As respostas baseadas nas fontes apresentarem citações.
+14. O Context Engine respeitar os limites configurados.
+15. O histórico permanecer salvo localmente.
+16. O usuário conseguir ler fontes e consultar o histórico offline.
+
+---
+
+13. Orientações para o agente de programação do Google AI Studio
+
+Você será o agente responsável por transformar este PRD em um aplicativo Android funcional.
+
+O usuário utilizará você como subagente de programação, enquanto o planejamento do produto e as decisões arquiteturais serão conduzidos externamente.
+
+Siga estas regras:
+
+1. Leia o PRD inteiro antes de começar.
+2. Analise todas as capturas de tela anexadas do NotebookLM.
+3. Não comece criando apenas uma demonstração visual. O objetivo é construir um aplicativo real.
+4. Priorize a fundação técnica e a arquitetura modular.
+5. Não acople o aplicativo ao Gemini.
+6. O contrato principal do chat deverá ser compatível com "POST /chat/completions".
+7. Implemente a descoberta de modelos por "/models".
+8. Permita cadastro manual de provedores e modelos.
+9. Não limite artificialmente a quantidade de provedores ou modelos.
+10. Não exija capacidade de visão dos modelos generativos.
+11. Mantenha a ingestão de documentos independente dos modelos generativos.
+12. Não misture o provedor de embeddings com o provedor de chat.
+13. Não implemente todos os recursos de uma só vez. Respeite as fases do roadmap.
+14. Crie código organizado, reutilizável e testável.
+15. Evite arquivos gigantes e componentes monolíticos.
+16. Explique decisões técnicas importantes e sinalize limitações reais.
+17. Não invente endpoints ou capacidades de provedores.
+18. Preserve compatibilidade com o Android e as versões de SDK definidas para o projeto.
+19. Não remova requisitos do PRD sem justificar e solicitar validação.
+20. Ao concluir cada fase, apresente o que foi implementado, os arquivos principais, os testes executados e o que falta.
+
+Primeira tarefa: analisar as referências visuais, propor a estrutura de navegação e a arquitetura inicial do projeto Android. Em seguida, apresentar um plano de implementação da Fase 0, sem antecipar funcionalidades que dependam de módulos ainda não construídos.
+
+---
+
+14. Decisões que não devem ser alteradas sem validação
+
+- Android nativo com Kotlin.
+- Jetpack Compose como tecnologia de interface.
+- Arquitetura local-first.
+- Chat universal como funcionalidade central.
+- "POST /chat/completions" como padrão principal de integração.
+- "GET /models" para descoberta de modelos.
+- Cadastro manual de provedores e modelos.
+- Quantidade de provedores e modelos sem limite artificial.
+- Context window e max output tokens configuráveis por modelo.
+- Tool calling como capacidade suportada e controlada pela aplicação.
+- Visão computacional não obrigatória para modelos generativos.
+- Processamento de documentos independente dos modelos de chat.
+- Context Engine independente do provedor.
+- Gemini Embedding 2 como opção de embeddings, não como dependência do chat.
+- Funcionamento offline parcial.
+- Interface inspirada nas referências do NotebookLM, adaptada para Android.
+
+Resultado esperado: um aplicativo Android de conhecimento pessoal com experiência visual inspirada no NotebookLM, mas com liberdade de provedores, modelos, limites de contexto, fontes e organização.
