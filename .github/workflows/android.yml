@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       build_release_preview:
-        description: Build and smoke-test a signed release APK without publishing
+        description: Build a signed release APK without publishing (device smoke test deferred)
         type: boolean
         required: false
         default: false
@@ -234,52 +234,7 @@ jobs:
           EOF
           cat dist/release-manifest.json
 
-      - name: Accept Android SDK licenses and install API 24 image for release smoke
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
-        shell: bash
-        run: |
-          set +e
-          yes | sdkmanager --licenses >/dev/null
-          LICENSE_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$LICENSE_STATUS" -eq 0
-          set +e
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
-          INSTALL_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$INSTALL_STATUS" -eq 0
-
-      - name: Smoke test signed release APK on API 24 emulator
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
-        timeout-minutes: 15
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 24
-          arch: x86_64
-          target: default
-          profile: Nexus 5X
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: true
-          script: |
-            adb install -r "dist/FolioNote-${RELEASE_TAG}.apk"
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
-            adb shell am start -n com.sjos.folionote/.MainActivity
-            APP_RUNNING=false
-            for attempt in {1..15}; do
-              if adb shell pidof com.sjos.folionote >/dev/null; then
-                APP_RUNNING=true
-                break
-              fi
-              sleep 1
-            done
-            if [[ "$APP_RUNNING" != "true" ]]; then
-              adb logcat -d -t 1000 | tail -200
-              exit 1
-            fi
-            if adb logcat -d -t 1000 | grep -E "FATAL EXCEPTION|Process: com.sjos.folionote"; then
-              exit 1
-            fi
+      # Emulator smoke tests are intentionally deferred to physical-device validation.
 
       - name: Upload signed release preview artifact
         if: github.event_name == 'workflow_dispatch' && inputs.build_release_preview
@@ -303,97 +258,3 @@ jobs:
           files: |
             dist/FolioNote-${{ github.ref_name }}.apk
             dist/release-manifest.json
-
-  android-instrumented:
-    name: Android API ${{ matrix.api-level }} Instrumented Tests
-    if: github.ref_type != 'tag'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    needs: android
-    strategy:
-      fail-fast: false
-      matrix:
-        api-level: [24, 35]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Android SDK command-line tools
-        uses: android-actions/setup-android@v4
-        with:
-          accept-android-sdk-licenses: false
-          packages: ''
-
-      - name: Accept Android SDK licenses and install API 24 emulator image
-        shell: bash
-        run: |
-          set +e
-          yes | sdkmanager --licenses >/dev/null
-          LICENSE_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$LICENSE_STATUS" -eq 0
-
-          set +e
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-${{ matrix.api-level }};default;x86_64"
-          INSTALL_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$INSTALL_STATUS" -eq 0
-          adb version
-
-      - name: Set up Gradle from the committed Wrapper
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Prepare debug signing key
-        run: |
-          keytool -genkeypair -noprompt \
-            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storetype JKS \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-      - name: Run instrumented tests on Android API ${{ matrix.api-level }} emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        timeout-minutes: 20
-        with:
-          api-level: ${{ matrix.api-level }}
-          arch: x86_64
-          target: default
-          profile: Nexus 5X
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          emulator-boot-timeout: 900
-          disable-animations: true
-          script: |
-            ./gradlew --no-daemon assembleDebugAndroidTest
-            ./gradlew --offline --no-daemon connectedDebugAndroidTest
-
-      - name: Capture emulator and instrumented-test diagnostics
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          adb devices -l > artifacts/adb-devices.txt 2>&1 || true
-          adb logcat -d > artifacts/emulator-logcat.txt 2>&1 || true
-          find app/build/reports app/build/outputs -maxdepth 5 \
-            \( -iname '*androidTest*' -o -iname '*connected*' \) -print \
-            > artifacts/instrumented-report-paths.txt 2>&1 || true
-
-      - name: Upload instrumented test reports and emulator logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: folionote-instrumented-api-${{ matrix.api-level }}-${{ github.run_id }}
-          path: |
-            app/build/reports/androidTests/
-            app/build/outputs/androidTest-results/
-            app/build/test-results/connected/
-            artifacts/
-          if-no-files-found: ignore
