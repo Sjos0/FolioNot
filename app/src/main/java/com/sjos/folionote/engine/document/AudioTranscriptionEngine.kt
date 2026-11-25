@@ -560,7 +560,7 @@ class ExternalAudioTranscriptionEngine(
         val apiDetail = extractApiErrorMessage(rawBody)
         val msg = when (code) {
             401 -> "Chave de API inválida ou expirada para $providerLabel (HTTP 401). Verifique sua chave nas Configurações."
-            413 -> "Arquivo acima do limite aceito pelo servidor (HTTP 413 — o plano gratuito da Groq aceita até 25 MB por envio)."
+            413 -> "Arquivo acima do limite aceito pelo serviço ou plano atual (HTTP 413). Reduza o arquivo ou divida a mídia e tente novamente."
             422 -> "Formato de mídia ou parâmetro recusado por $providerLabel (HTTP 422)${if (apiDetail.isNotBlank()) ": $apiDetail" else "."}"
             429 -> buildString {
                 append("Limite de cota/requisições atingido em $providerLabel (HTTP 429).")

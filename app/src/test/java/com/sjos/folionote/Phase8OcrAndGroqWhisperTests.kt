@@ -585,6 +585,10 @@ class Phase8OcrAndGroqWhisperTests {
                 assertTrue(fail.isFailure)
                 val exc = fail.exceptionOrNull() as TranscriptionHttpException
                 assertEquals(code, exc.statusCode)
+                if (code == 413) {
+                    assertTrue(exc.message.orEmpty().contains("plano atual"))
+                    assertFalse("Plan-specific size limits must not be presented as universal", exc.message.orEmpty().contains("25 MB"))
+                }
                 if (code == 429) {
                     assertEquals(18L, exc.retryAfterSeconds)
                     assertTrue(exc.message.orEmpty().contains("18s"))
