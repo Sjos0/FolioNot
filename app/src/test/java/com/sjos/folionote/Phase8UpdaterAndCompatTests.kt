@@ -458,6 +458,7 @@ class Phase8UpdaterEngineTests {
         val simulateCanInstall = AtomicBoolean(false)
 
         val streamStartedLatch = AtomicReference(CountDownLatch(1))
+        val lastAssetRangeHeader = AtomicReference<String?>(null)
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { ex ->
             when (ex.requestURI.path) {
@@ -476,19 +477,33 @@ class Phase8UpdaterEngineTests {
                     ex.responseBody.use { it.write(body) }
                 }
                 "/assets/FolioNote-v1.2.0.apk" -> {
+                    lastAssetRangeHeader.set(ex.requestHeaders.getFirst("Range"))
                     if (interruptMidStream.get()) {
                         ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
                         ex.responseBody.write(tempApkPayload, 0, 8192)
                         ex.responseBody.flush()
                         ex.close()
                     } else {
-                        ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
-                        ex.responseBody.use { out ->
-                            out.write(tempApkPayload, 0, 16384)
-                            out.flush()
-                            streamStartedLatch.get().countDown()
-                            Thread.sleep(500)
-                            out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
+                        val rangeHeader = ex.requestHeaders.getFirst("Range")
+                        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                            val offset = rangeHeader.removePrefix("bytes=").removeSuffix("-").toInt()
+                            ex.responseHeaders.add(
+                                "Content-Range",
+                                "bytes $offset-${tempApkPayload.lastIndex}/${tempApkPayload.size}"
+                            )
+                            ex.sendResponseHeaders(206, (tempApkPayload.size - offset).toLong())
+                            ex.responseBody.use { out ->
+                                out.write(tempApkPayload, offset, tempApkPayload.size - offset)
+                            }
+                        } else {
+                            ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
+                            ex.responseBody.use { out ->
+                                out.write(tempApkPayload, 0, 16384)
+                                out.flush()
+                                streamStartedLatch.get().countDown()
+                                Thread.sleep(500)
+                                out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
+                            }
                         }
                     }
                 }
@@ -573,13 +588,18 @@ class Phase8UpdaterEngineTests {
             assertTrue(manager.uiState.value is UpdateUiState.Paused)
             interruptMidStream.set(false)
 
-            // 3. Verification failure deletes corrupted/untrusted APK & fails cleanly
+            // 3. Retry resumes from the saved byte offset using HTTP Range / 206.
+            manager.downloadAndVerifyInternal(update)
+            assertEquals("bytes=8192-", lastAssetRangeHeader.get())
+            assertTrue(manager.uiState.value is UpdateUiState.AwaitingInstallPermission)
+
+            // 4. Verification failure deletes corrupted/untrusted APK & fails cleanly
             failVerification.set(true)
             manager.downloadAndVerifyInternal(update)
             assertTrue(manager.uiState.value is UpdateUiState.Failed)
             assertFalse(File(updatesFolder, "FolioNote-update-1002000.apk").exists())
 
-            // 3. Valid download -> AwaitingInstallPermission -> user grants -> ReadyToInstall
+            // 5. Valid download -> AwaitingInstallPermission -> user grants -> ReadyToInstall
             failVerification.set(false)
             simulateCanInstall.set(false)
             manager.downloadAndVerifyInternal(update)
