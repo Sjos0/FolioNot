@@ -179,7 +179,6 @@ class FolioNoteApp : Application() {
         appScope.launch {
             container.database.toolAndJobDao().upsertTools(ToolEngine.builtInTools())
             container.pipelineManager.recoverInterruptedJobs()
-            container.appUpdateManager.checkForUpdatesAutomatically()
         }
     }
 }

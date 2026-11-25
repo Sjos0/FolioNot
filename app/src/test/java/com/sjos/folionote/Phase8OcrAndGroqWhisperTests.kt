@@ -61,6 +61,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -454,11 +455,13 @@ class Phase8OcrAndGroqWhisperTests {
         val tempDir = Files.createTempDirectory("folionote_groq_http").toFile()
         val audioFile = File(tempDir, "reuniao.m4a").apply { writeBytes("aac-payload-data".toByteArray()) }
 
-        var nextStatus = 200
-        var nextRetryAfter: String? = null
+        val nextStatus = AtomicInteger(200)
+        val nextRetryAfter = AtomicReference<String?>(null)
         val (server, calls) = startServer {
-            val hdrs = if (nextRetryAfter != null) mapOf("Retry-After" to nextRetryAfter!!) else emptyMap()
-            val body = if (nextStatus == 200) {
+            val retryAfter = nextRetryAfter.get()
+            val status = nextStatus.get()
+            val hdrs = if (retryAfter != null) mapOf("Retry-After" to retryAfter) else emptyMap()
+            val body = if (status == 200) {
                 JSONObject()
                     .put("language", "pt")
                     .put("text", "Ata concluída com sucesso.")
@@ -471,7 +474,7 @@ class Phase8OcrAndGroqWhisperTests {
             } else {
                 """{"error":{"message":"rate or payload error"}}"""
             }
-            Triple(nextStatus, hdrs, body)
+            Triple(status, hdrs, body)
         }
 
         val fakeMeta = object : MediaMetadataReader {
@@ -492,14 +495,14 @@ class Phase8OcrAndGroqWhisperTests {
                 )
                 val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta)
                 val res = engine.transcribe(audioFile, "audio/mp4")
-                assertTrue(res.isSuccess)
+                assertTrue("Groq model $modelId failed: ${res.exceptionOrNull()?.message}", res.isSuccess)
                 val call = calls.last()
                 assertEquals("Bearer gsk_test_groq_key_12345", call.headers["authorization"])
-                assertTrue(call.bodyText.contains("name=\"model\"\r\n\r\n$modelId"))
-                assertTrue(call.bodyText.contains("name=\"language\"\r\n\r\npt"))
-                assertTrue(call.bodyText.contains("name=\"response_format\"\r\n\r\nverbose_json"))
-                assertTrue(call.bodyText.contains("name=\"temperature\"\r\n\r\n0"))
-                assertTrue(call.bodyText.contains("reuniao.m4a"))
+                assertTrue("Missing model multipart field for $modelId", call.bodyText.contains("name=\"model\"\r\n\r\n$modelId"))
+                assertTrue("Missing language multipart field", call.bodyText.contains("name=\"language\"\r\n\r\npt"))
+                assertTrue("Missing verbose_json response_format", call.bodyText.contains("name=\"response_format\"\r\n\r\nverbose_json"))
+                assertTrue("Missing temperature=0", call.bodyText.contains("name=\"temperature\"\r\n\r\n0"))
+                assertTrue("Missing audio filename", call.bodyText.contains("reuniao.m4a"))
             }
 
             // Export non-secret JSON never exposes key
@@ -508,8 +511,8 @@ class Phase8OcrAndGroqWhisperTests {
 
             val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta)
             for (code in listOf(401, 413, 422, 429, 500)) {
-                nextStatus = code
-                nextRetryAfter = if (code == 429) "18" else null
+                nextStatus.set(code)
+                nextRetryAfter.set(if (code == 429) "18" else null)
                 val fail = engine.transcribe(audioFile, "audio/mp4")
                 assertTrue(fail.isFailure)
                 val exc = fail.exceptionOrNull() as TranscriptionHttpException

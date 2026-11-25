@@ -310,6 +310,7 @@ class AndroidMediaExtractorSegmenter : MediaSegmenter {
         workDir: File
     ): SegmentationPlanResult? {
         return runCatching {
+            if (!workDir.exists() && !workDir.mkdirs()) return@runCatching null
             FileInputStream(wavFile).use { input ->
                 val header = ByteArray(12)
                 if (input.read(header) != 12) return@runCatching null
@@ -357,7 +358,7 @@ class AndroidMediaExtractorSegmenter : MediaSegmenter {
                 if (dataOffset < 0 || dataSize <= 0 || byteRate <= 0 || blockAlign <= 0) return@runCatching null
 
                 val maxDataBytesByDuration = ((preferredDurationMs / 1000.0) * byteRate).toLong()
-                val maxDataBytesBySize = (maxBytesPerChunk - 44L).coerceAtLeast(byteRate * 10L)
+                val maxDataBytesBySize = (maxBytesPerChunk - 44L).coerceAtLeast(blockAlign.toLong())
                 val rawChunkDataBytes = minOf(maxDataBytesByDuration, maxDataBytesBySize)
                 val chunkDataBytes = (rawChunkDataBytes / blockAlign) * blockAlign
                 if (chunkDataBytes <= blockAlign) return@runCatching null

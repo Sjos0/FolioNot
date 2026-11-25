@@ -53,7 +53,10 @@ import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [24, 25, 26, 36])
@@ -325,7 +328,7 @@ class Phase8UpdaterEngineTests {
                 else -> Triple(404, emptyMap(), ByteArray(0))
             }
         }
-        port = server.address.port
+        port.set(server.address.port)
 
         val installedLower = InstalledAppVersionInfo("com.sjos.folionote", "1.0.0", 1000000L)
         val installedSame = InstalledAppVersionInfo("com.sjos.folionote", "1.2.0", 1002000L)
@@ -417,18 +420,18 @@ class Phase8UpdaterEngineTests {
         val apkSha = AndroidApkSignatureVerifier.sha256Hex(tempApkPayload)
         val updatesFolder = File(context.filesDir, "updates").apply { deleteRecursively() }
 
-        var port = 0
-        var interruptMidStream = false
-        var failVerification = false
-        var simulateInstalledVersionCode = 1000000L
-        var simulateCanInstall = false
+        val port = AtomicInteger(0)
+        val interruptMidStream = AtomicBoolean(false)
+        val failVerification = AtomicBoolean(false)
+        val simulateInstalledVersionCode = AtomicLong(1000000L)
+        val simulateCanInstall = AtomicBoolean(false)
 
-        var streamStartedLatch = CountDownLatch(1)
+        val streamStartedLatch = AtomicReference(CountDownLatch(1))
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { ex ->
             when (ex.requestURI.path) {
                 "/latest" -> {
-                    val body = buildReleaseJson(port, apkSize = tempApkPayload.size.toLong(), apkDigest = "sha256:$apkSha").toByteArray()
+                    val body = buildReleaseJson(port.get(), apkSize = tempApkPayload.size.toLong(), apkDigest = "sha256:$apkSha").toByteArray()
                     ex.sendResponseHeaders(200, body.size.toLong())
                     ex.responseBody.use { it.write(body) }
                 }
@@ -442,7 +445,7 @@ class Phase8UpdaterEngineTests {
                     ex.responseBody.use { it.write(body) }
                 }
                 "/assets/FolioNote-v1.2.0.apk" -> {
-                    if (interruptMidStream) {
+                    if (interruptMidStream.get()) {
                         ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
                         ex.responseBody.write(tempApkPayload, 0, 8192)
                         ex.responseBody.flush()
@@ -452,7 +455,7 @@ class Phase8UpdaterEngineTests {
                         ex.responseBody.use { out ->
                             out.write(tempApkPayload, 0, 16384)
                             out.flush()
-                            streamStartedLatch.countDown()
+                            streamStartedLatch.get().countDown()
                             Thread.sleep(150)
                             out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
                         }
@@ -461,16 +464,16 @@ class Phase8UpdaterEngineTests {
             }
         }
         server.start()
-        port = server.address.port
+        port.set(server.address.port)
 
         val verifier = object : ApkVerifier {
             override fun getInstalledAppInfo() =
-                InstalledAppVersionInfo("com.sjos.folionote", "1.0.0", simulateInstalledVersionCode)
+                InstalledAppVersionInfo("com.sjos.folionote", "1.0.0", simulateInstalledVersionCode.get())
 
             override fun getInstalledSigningCertSha256List() = listOf("a".repeat(64))
 
             override fun verifyDownloadedApk(apkFile: File, manifest: ReleaseManifest, expectedSha256: String): Result<Unit> {
-                return if (failVerification) {
+                return if (failVerification.get()) {
                     Result.failure(IllegalStateException("Certificado inválido para teste"))
                 } else {
                     val hash = AndroidApkSignatureVerifier.computeSha256Hex(apkFile)
@@ -492,7 +495,7 @@ class Phase8UpdaterEngineTests {
             releaseService = service,
             apkVerifier = verifier,
             sdkIntProvider = { 26 },
-            canRequestInstallsApi26Provider = { simulateCanInstall },
+            canRequestInstallsApi26Provider = { simulateCanInstall.get() },
             allowLocalhostForTests = true
         )
 
@@ -501,31 +504,35 @@ class Phase8UpdaterEngineTests {
             val update = checkOutcome.update
 
             // 1. Cancel mid-stream removes .part file cleanly
-            streamStartedLatch = CountDownLatch(1)
-            val downloadJob = launch(Dispatchers.IO) { manager.downloadAndVerifyInternal(update) }
+            streamStartedLatch.set(CountDownLatch(1))
+            manager.startOrResumeDownload(update)
             withContext(Dispatchers.IO) {
-                streamStartedLatch.await(5, TimeUnit.SECONDS)
+                assertTrue(streamStartedLatch.get().await(5, TimeUnit.SECONDS))
+            }
+            withTimeout(5_000L) {
+                while (!File(updatesFolder, "FolioNote-update.apk.part").exists() ||
+                    File(updatesFolder, "FolioNote-update.apk.part").length() == 0L
+                ) delay(10L)
             }
             manager.cancelDownload()
-            downloadJob.join()
             assertTrue(manager.uiState.value is UpdateUiState.Cancelled)
             assertFalse(File(updatesFolder, "FolioNote-update.apk.part").exists())
 
             // 2. Interrupted mid-stream download transitions to Paused cleanly
-            interruptMidStream = true
+            interruptMidStream.set(true)
             manager.downloadAndVerifyInternal(update)
             assertTrue(manager.uiState.value is UpdateUiState.Paused)
-            interruptMidStream = false
+            interruptMidStream.set(false)
 
             // 3. Verification failure deletes corrupted/untrusted APK & fails cleanly
-            failVerification = true
+            failVerification.set(true)
             manager.downloadAndVerifyInternal(update)
             assertTrue(manager.uiState.value is UpdateUiState.Failed)
             assertFalse(File(updatesFolder, "FolioNote-update-1002000.apk").exists())
 
             // 3. Valid download -> AwaitingInstallPermission -> user grants -> ReadyToInstall
-            failVerification = false
-            simulateCanInstall = false
+            failVerification.set(false)
+            simulateCanInstall.set(false)
             manager.downloadAndVerifyInternal(update)
             assertTrue(manager.uiState.value is UpdateUiState.AwaitingInstallPermission)
 
@@ -534,7 +541,7 @@ class Phase8UpdaterEngineTests {
             assertTrue(manager.uiState.value is UpdateUiState.AwaitingInstallPermission)
 
             // Return after granting -> transitions to ReadyToInstall
-            simulateCanInstall = true
+            simulateCanInstall.set(true)
             manager.refreshStateAfterExternalReturn()
             assertTrue(manager.uiState.value is UpdateUiState.ReadyToInstall)
 
@@ -546,7 +553,7 @@ class Phase8UpdaterEngineTests {
             assertTrue(manager.uiState.value is UpdateUiState.ReadyToInstall)
 
             manager.launchSystemInstaller(activity)
-            simulateInstalledVersionCode = 1002000L
+            simulateInstalledVersionCode.set(1002000L)
             manager.refreshStateAfterExternalReturn()
             assertTrue(manager.uiState.value is UpdateUiState.Installed)
             assertFalse(updatesFolder.exists())

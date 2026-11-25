@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val appContainer = (application as FolioNoteApp).container
+        appContainer.appUpdateManager.checkForUpdatesAutomatically()
         handleIncomingIntent(intent, appContainer)
 
         setContent {
@@ -157,6 +158,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val appContainer = (application as FolioNoteApp).container
+        appContainer.appUpdateManager.checkForUpdatesAutomatically()
         handleIncomingIntent(intent, appContainer)
     }
 

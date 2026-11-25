@@ -86,6 +86,16 @@ jobs:
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: folionote-unit-test-reports-${{ github.run_id }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+
       - name: Upload debug APK
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
