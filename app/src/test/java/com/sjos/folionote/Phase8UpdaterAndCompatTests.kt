@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -328,7 +329,7 @@ class Phase8UpdaterEngineTests {
                 else -> Triple(404, emptyMap(), ByteArray(0))
             }
         }
-        port.set(server.address.port)
+        port = server.address.port
 
         val installedLower = InstalledAppVersionInfo("com.sjos.folionote", "1.0.0", 1000000L)
         val installedSame = InstalledAppVersionInfo("com.sjos.folionote", "1.2.0", 1002000L)
