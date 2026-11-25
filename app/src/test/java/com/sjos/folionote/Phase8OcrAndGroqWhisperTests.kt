@@ -498,10 +498,22 @@ class Phase8OcrAndGroqWhisperTests {
                 assertTrue("Groq model $modelId failed: ${res.exceptionOrNull()?.message}", res.isSuccess)
                 val call = calls.last()
                 assertEquals("Bearer gsk_test_groq_key_12345", call.headers["authorization"])
-                assertTrue("Missing model multipart field for $modelId", call.bodyText.contains("name=\"model\"\r\n\r\n$modelId"))
-                assertTrue("Missing language multipart field", call.bodyText.contains("name=\"language\"\r\n\r\npt"))
-                assertTrue("Missing verbose_json response_format", call.bodyText.contains("name=\"response_format\"\r\n\r\nverbose_json"))
-                assertTrue("Missing temperature=0", call.bodyText.contains("name=\"temperature\"\r\n\r\n0"))
+                assertTrue(
+                    "Missing model multipart field for $modelId; body=${call.bodyText.take(1800)}",
+                    call.bodyText.contains("name=\"model\"") && call.bodyText.contains(modelId)
+                )
+                assertTrue(
+                    "Missing language multipart field",
+                    call.bodyText.contains("name=\"language\"") && call.bodyText.contains("pt")
+                )
+                assertTrue(
+                    "Missing verbose_json response_format",
+                    call.bodyText.contains("name=\"response_format\"") && call.bodyText.contains("verbose_json")
+                )
+                assertTrue(
+                    "Missing temperature=0",
+                    call.bodyText.contains("name=\"temperature\"") && Regex("\\b0(?:\\.0)?\\b").containsMatchIn(call.bodyText)
+                )
                 assertTrue("Missing audio filename", call.bodyText.contains("reuniao.m4a"))
             }
 

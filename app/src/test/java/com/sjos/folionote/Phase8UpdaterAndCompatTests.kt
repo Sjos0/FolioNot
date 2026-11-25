@@ -497,6 +497,7 @@ class Phase8UpdaterEngineTests {
             apkVerifier = verifier,
             sdkIntProvider = { 26 },
             canRequestInstallsApi26Provider = { simulateCanInstall.get() },
+            availableBytesProvider = { Long.MAX_VALUE },
             allowLocalhostForTests = true
         )
 
@@ -507,8 +508,14 @@ class Phase8UpdaterEngineTests {
             // 1. Cancel mid-stream removes .part file cleanly
             streamStartedLatch.set(CountDownLatch(1))
             manager.startOrResumeDownload(update)
+            withTimeout(5_000L) {
+                while (manager.uiState.value !is UpdateUiState.Downloading &&
+                    manager.uiState.value !is UpdateUiState.Failed
+                ) delay(10L)
+            }
+            assertTrue("Download did not enter Downloading: ${manager.uiState.value}", manager.uiState.value is UpdateUiState.Downloading)
             withContext(Dispatchers.IO) {
-                assertTrue(streamStartedLatch.get().await(5, TimeUnit.SECONDS))
+                assertTrue("Asset request did not reach the local test server", streamStartedLatch.get().await(5, TimeUnit.SECONDS))
             }
             withTimeout(5_000L) {
                 while (!File(updatesFolder, "FolioNote-update.apk.part").exists() ||
