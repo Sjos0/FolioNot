@@ -487,7 +487,7 @@ class Phase8UpdaterEngineTests {
                             out.write(tempApkPayload, 0, 16384)
                             out.flush()
                             streamStartedLatch.get().countDown()
-                            Thread.sleep(150)
+                            Thread.sleep(500)
                             out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
                         }
                     }
@@ -546,6 +546,13 @@ class Phase8UpdaterEngineTests {
             assertTrue("Download did not enter Downloading: ${manager.uiState.value}", manager.uiState.value is UpdateUiState.Downloading)
             withContext(Dispatchers.IO) {
                 assertTrue("Asset request did not reach the local test server", streamStartedLatch.get().await(5, TimeUnit.SECONDS))
+            }
+            withTimeout(5_000L) {
+                while (true) {
+                    val current = manager.uiState.value
+                    if (current is UpdateUiState.Downloading && current.bytesDownloaded > 0L) break
+                    delay(10L)
+                }
             }
             val progress = manager.uiState.value as UpdateUiState.Downloading
             assertTrue("Download progress must reflect bytes actually written", progress.bytesDownloaded > 0L)
