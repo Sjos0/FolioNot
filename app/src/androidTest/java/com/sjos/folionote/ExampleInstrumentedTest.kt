@@ -16,6 +16,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.engine.document.DocumentExtractor
+import com.sjos.folionote.engine.updater.AndroidApkSignatureVerifier
 import kotlinx.coroutines.runBlocking
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
@@ -151,6 +152,15 @@ class ExampleInstrumentedTest {
         } finally {
             executeShellCommand("settings put global airplane_mode_on 0; am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false; svc wifi enable; svc data enable")
         }
+    }
+
+    @Test
+    fun installedApkSigningCertificateIsReadableOnTheDeviceApiLevel() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val fingerprints = AndroidApkSignatureVerifier(context).getInstalledSigningCertSha256List()
+
+        assertTrue("The installed FolioNote APK must expose its signing certificate", fingerprints.isNotEmpty())
+        assertTrue("The installed signing certificate must be SHA-256", fingerprints.all { it.length == 64 })
     }
 
     @Test
