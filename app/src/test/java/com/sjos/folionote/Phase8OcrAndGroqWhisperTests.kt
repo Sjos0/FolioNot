@@ -29,6 +29,7 @@ import com.sjos.folionote.engine.document.TranscriptMerger
 import com.sjos.folionote.engine.document.TranscriptSegment
 import com.sjos.folionote.engine.document.TranscriptionHttpException
 import com.sjos.folionote.engine.document.TranscriptionLimits
+import com.sjos.folionote.engine.worker.mergeSourceMetadata
 import com.sjos.folionote.engine.document.TranscriptionResult
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CancellationException
@@ -413,6 +414,61 @@ class Phase8OcrAndGroqWhisperTests {
     }
 
     @Test
+    fun `OCR extraction metadata is merged into indexed source metadata without losing origin`() {
+        val merged = JSONObject(
+            mergeSourceMetadata(
+                existingMetadata = mapOf(
+                    "source_uri" to "content://drive/document/123",
+                    "source_provider" to "google_drive",
+                    "pages" to "0"
+                ),
+                extractedMetadata = mapOf(
+                    "pdf_title" to "Relatório",
+                    "ocr" to "true",
+                    "pages" to "3"
+                )
+            )
+        )
+
+        assertEquals("content://drive/document/123", merged.getString("source_uri"))
+        assertEquals("google_drive", merged.getString("source_provider"))
+        assertEquals("Relatório", merged.getString("pdf_title"))
+        assertEquals("true", merged.getString("ocr"))
+        assertEquals("3", merged.getString("pages"))
+    }
+
+    @Test
+    fun `scanned PDF OCR preserves document title author and extraction metadata`() = runTest {
+        val tempDir = Files.createTempDirectory("folionote_scanned_pdf_metadata").toFile()
+        val scannedPdf = File(tempDir, "scanned-with-metadata.pdf")
+        try {
+            com.tom_roush.pdfbox.pdmodel.PDDocument().use { doc ->
+                doc.addPage(com.tom_roush.pdfbox.pdmodel.PDPage())
+                doc.documentInformation.title = "Relatório digitalizado"
+                doc.documentInformation.author = "Equipe de pesquisa"
+                doc.save(scannedPdf)
+            }
+
+            val localOcr = object : OcrEngine {
+                override suspend fun extractText(file: File): Result<List<ExtractedPage>> =
+                    Result.success(listOf(ExtractedPage(1, "Texto reconhecido localmente")))
+            }
+
+            val extracted = DocumentExtractor(ocrEngine = localOcr).extract(scannedPdf, SourceType.PDF)
+
+            assertFalse(extracted.requiresOcr)
+            assertEquals("Relatório digitalizado", extracted.metadata["pdf_title"])
+            assertEquals("Equipe de pesquisa", extracted.metadata["pdf_author"])
+            assertEquals("true", extracted.metadata["ocr"])
+            assertEquals("OCR", extracted.metadata["ocr_provider"])
+            assertEquals("1", extracted.metadata["pages"])
+            assertTrue(extracted.fullText.contains("Texto reconhecido localmente"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `native digital PDF skips OCR completely`() = runTest {
         val tempDir = Files.createTempDirectory("folionote_native_pdf").toFile()
         val nativePdf = File(tempDir, "nativo.pdf")
@@ -448,7 +504,7 @@ class Phase8OcrAndGroqWhisperTests {
     }
 
     @Test
-    fun `groq whisper sends multipart fields for both models and maps HTTP 401 413 422 429 and 500 cleanly`() = runTest {
+    fun `groq whisper sends multipart fields for both models and maps HTTP 401 413 422 429 and 5xx cleanly`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
         val crypto = KeystoreCryptoManager()
@@ -522,7 +578,7 @@ class Phase8OcrAndGroqWhisperTests {
             assertFalse(exported.contains("gsk_test_groq_key_12345"))
 
             val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta, allowLoopbackHttpForTests = true)
-            for (code in listOf(401, 413, 422, 429, 500)) {
+            for (code in listOf(401, 413, 422, 429, 500, 503)) {
                 nextStatus.set(code)
                 nextRetryAfter.set(if (code == 429) "18" else null)
                 val fail = engine.transcribe(audioFile, "audio/mp4")
@@ -599,6 +655,39 @@ class Phase8OcrAndGroqWhisperTests {
             assertTrue(plan.chunks.all { it.file.exists() && it.file.length() > 44L && it.file.length() <= 250_000L })
             assertEquals("RIFF", String(plan.chunks[0].file.readBytes().copyOfRange(0, 4), Charsets.US_ASCII))
             assertTrue(originalBytes.contentEquals(wavFile.readBytes()))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `Groq PCM segmentation enforces the ten minute product duration cap`() {
+        val tempDir = Files.createTempDirectory("folionote_groq_ten_minute_cap").toFile()
+        val wavFile = File(tempDir, "longer_than_ten_minutes.wav")
+        val workDir = File(tempDir, "segments")
+        try {
+            val originalBytes = createSyntheticPcmWav(
+                wavFile = wavFile,
+                sampleRate = 8_000,
+                durationSeconds = 601
+            )
+            val plan = AndroidMediaExtractorSegmenter().trySplitWavPcm(
+                wavFile = wavFile,
+                preferredDurationMs = TranscriptionLimits.GROQ_MAX_PART_DURATION_MS,
+                overlapMs = 3_000L,
+                maxBytesPerChunk = 12_000_000L,
+                workDir = workDir
+            )
+
+            assertTrue("Audio longer than ten minutes must be split", plan != null && plan.chunks.size >= 2)
+            val chunks = requireNotNull(plan).chunks
+            assertTrue(
+                "The ten-minute segment duration is a FolioNote product requirement",
+                chunks.all { it.durationMs <= TranscriptionLimits.GROQ_MAX_PART_DURATION_MS }
+            )
+            assertEquals(0L, chunks.first().offsetMs)
+            assertTrue("Adjacent chunks must retain overlap", chunks[1].offsetMs < chunks[0].durationMs)
+            assertTrue("Segmentation must not modify the original audio", originalBytes.contentEquals(wavFile.readBytes()))
         } finally {
             tempDir.deleteRecursively()
         }

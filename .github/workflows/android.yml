@@ -66,6 +66,20 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      - name: Prepare CI-only release signing key
+        if: ${{ github.ref_type != 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        shell: bash
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$GITHUB_WORKSPACE/ci-release.keystore" \
+            -storetype JKS \
+            -storepass ci-only-password \
+            -keypass ci-only-password \
+            -alias ci-release \
+            -keyalg RSA -keysize 2048 -validity 365 \
+            -dname "CN=FolioNote CI Only,O=FolioNote,C=US"
+          chmod 600 "$GITHUB_WORKSPACE/ci-release.keystore"
+
       - name: Determine Android version
         shell: bash
         env:
@@ -106,7 +120,19 @@ jobs:
 
       - name: Run unit tests (API 24..36 matrix) and build debug APK
         run: |
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug \
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest \
+            -PappVersionName="$APP_VERSION_NAME" \
+            -PappVersionCode="$APP_VERSION_CODE"
+
+      - name: Run release unit tests, lint and build with ephemeral CI signing key
+        if: ${{ github.ref_type != 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/ci-release.keystore
+          STORE_PASSWORD: ci-only-password
+          KEY_PASSWORD: ci-only-password
+          KEY_ALIAS: ci-release
+        run: |
+          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease \
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 
@@ -120,6 +146,10 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/lint-results-debug.html
             app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+            app/build/reports/tests/testReleaseUnitTest/
+            app/build/test-results/testReleaseUnitTest/
+            app/build/reports/lint-results-release.html
+            app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt
           if-no-files-found: ignore
 
       - name: Upload debug APK
@@ -276,12 +306,16 @@ jobs:
             dist/FolioNote-${{ github.ref_name }}.apk
             dist/release-manifest.json
 
-  android-api24-smoke:
-    name: API 24 Emulator Smoke Test
+  android-instrumented:
+    name: Android API ${{ matrix.api-level }} Instrumented Tests
     if: github.ref_type != 'tag'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: android
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [24, 35]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -308,7 +342,7 @@ jobs:
           test "$LICENSE_STATUS" -eq 0
 
           set +e
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
+          yes | sdkmanager "platform-tools" "emulator" "system-images;android-${{ matrix.api-level }};default;x86_64"
           INSTALL_STATUS=${PIPESTATUS[1]}
           set -e
           test "$INSTALL_STATUS" -eq 0
@@ -328,17 +362,40 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Run instrumented tests on API 24 emulator
+      - name: Run instrumented tests on Android API ${{ matrix.api-level }} emulator
         uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 20
         with:
-          api-level: 24
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: default
           profile: Nexus 5X
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-boot-timeout: 900
           disable-animations: true
           script: |
             ./gradlew --no-daemon assembleDebugAndroidTest
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
             ./gradlew --offline --no-daemon connectedDebugAndroidTest
+
+      - name: Capture emulator and instrumented-test diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          adb devices -l > artifacts/adb-devices.txt 2>&1 || true
+          adb logcat -d > artifacts/emulator-logcat.txt 2>&1 || true
+          find app/build/reports app/build/outputs -maxdepth 5 \
+            \( -iname '*androidTest*' -o -iname '*connected*' \) -print \
+            > artifacts/instrumented-report-paths.txt 2>&1 || true
+
+      - name: Upload instrumented test reports and emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: folionote-instrumented-api-${{ matrix.api-level }}-${{ github.run_id }}
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            app/build/test-results/connected/
+            artifacts/
+          if-no-files-found: ignore

@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [24, 25, 26, 36])
+@Config(sdk = [24, 25, 26, 27, 28, 35, 36])
 class Phase8ApiCompatMatrixTests {
 
     @Test
@@ -155,6 +155,15 @@ class Phase8ApiCompatMatrixTests {
         assertEquals(1, digests.size)
         assertEquals(64, digests.first().length)
     }
+    @Test
+    fun `installed signing certificate lookup supports legacy and modern PackageManager APIs`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val fingerprints = AndroidApkSignatureVerifier(context).getInstalledSigningCertSha256List()
+
+        assertTrue("The installed test APK must expose its signing certificate", fingerprints.isNotEmpty())
+        assertTrue("Every certificate fingerprint must be SHA-256", fingerprints.all { it.length == 64 })
+    }
+
     @Test
     fun `extractor flags are safely translated to codec flags across API levels`() {
         assertEquals(
@@ -538,6 +547,10 @@ class Phase8UpdaterEngineTests {
             withContext(Dispatchers.IO) {
                 assertTrue("Asset request did not reach the local test server", streamStartedLatch.get().await(5, TimeUnit.SECONDS))
             }
+            val progress = manager.uiState.value as UpdateUiState.Downloading
+            assertTrue("Download progress must reflect bytes actually written", progress.bytesDownloaded > 0L)
+            assertEquals(tempApkPayload.size.toLong(), progress.totalBytes)
+            assertTrue("The first streamed chunk must not be reported as complete", progress.percent in 1..99)
             withTimeout(5_000L) {
                 while (!File(updatesFolder, "FolioNote-update.apk.part").exists() ||
                     File(updatesFolder, "FolioNote-update.apk.part").length() == 0L

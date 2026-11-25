@@ -23,6 +23,11 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
+internal fun mergeSourceMetadata(
+    existingMetadata: Map<String, String>,
+    extractedMetadata: Map<String, String>
+): String = JSONObject(existingMetadata + extractedMetadata).toString()
+
 class SourceProcessingWorker(
     appContext: Context,
     params: WorkerParameters
@@ -87,7 +92,7 @@ class SourceProcessingWorker(
                     jobDao.updateJobProgress(jobId, JobStatus.RUNNING.name, 0.25f, msg)
                 }
             )
-            val mergedMetaJson = JSONObject(extracted.metadata).toString()
+            val mergedMetaJson = mergeSourceMetadata(existingMeta, extracted.metadata)
 
             if (extracted.requiresOcr) {
                 val ocrMsg = extracted.partialError
