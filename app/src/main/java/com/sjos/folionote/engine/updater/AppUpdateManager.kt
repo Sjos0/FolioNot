@@ -1,5 +1,6 @@
 package com.sjos.folionote.engine.updater
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -167,6 +168,8 @@ class AppUpdateManager(
         }
     }
 
+    // sdkIntProvider defaults to Build.VERSION.SDK_INT; injection exists only for compatibility tests.
+    @SuppressLint("NewApi")
     fun createUnknownSourcesSettingsIntent(): Intent {
         return if (sdkIntProvider() >= Build.VERSION_CODES.O) {
             Intent(

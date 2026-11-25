@@ -1,5 +1,6 @@
 package com.sjos.folionote.engine.updater
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -121,6 +122,8 @@ class AndroidApkSignatureVerifier(
         }
     }
 
+    // sdkInt is Build.VERSION.SDK_INT in production; it is injectable only for Robolectric API-matrix tests.
+    @SuppressLint("NewApi")
     internal fun extractCertFingerprints(packageInfo: PackageInfo, sdkInt: Int): List<String> {
         val signatures: Array<Signature> = if (sdkInt >= Build.VERSION_CODES.P) {
             val signingInfo = packageInfo.signingInfo ?: return emptyList()

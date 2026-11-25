@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.media.MediaMuxer
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.core.preferences.AppSettings
@@ -94,7 +95,11 @@ class AndroidMediaMetadataReader : MediaMetadataReader {
             val mime = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE).orEmpty()
             val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE).orEmpty()
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST).orEmpty()
-            val hasAudioFlag = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+            val hasAudioFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+            } else {
+                null
+            }
             val detectedAudioTrack = if (hasAudioFlag.equals("yes", ignoreCase = true)) {
                 true
             } else {
