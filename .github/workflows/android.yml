@@ -7,6 +7,17 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_release_preview:
+        description: Build and smoke-test a signed release APK without publishing
+        type: boolean
+        required: false
+        default: false
+      release_version:
+        description: Semantic version for the preview (for example 1.0.0)
+        type: string
+        required: false
+        default: "1.0.0"
 
 permissions:
   contents: write
@@ -19,6 +30,7 @@ jobs:
   android:
     name: Build and test FolioNote
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,7 +38,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -56,11 +68,25 @@ jobs:
 
       - name: Determine Android version
         shell: bash
+        env:
+          BUILD_RELEASE_PREVIEW: ${{ inputs.build_release_preview }}
+          PREVIEW_VERSION: ${{ inputs.release_version }}
         run: |
+          RELEASE_TAG=""
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+            RELEASE_TAG="$GITHUB_REF_NAME"
+            VERSION="${RELEASE_TAG#v}"
+          elif [[ "$BUILD_RELEASE_PREVIEW" == "true" ]]; then
+            VERSION="$PREVIEW_VERSION"
+            RELEASE_TAG="v${VERSION}"
+          else
+            VERSION="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+          fi
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" || "$BUILD_RELEASE_PREVIEW" == "true" ]]; then
             if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "Use tags in semantic version format: vMAJOR.MINOR.PATCH"
+              echo "Use semantic version format MAJOR.MINOR.PATCH."
               exit 1
             fi
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
@@ -73,12 +99,10 @@ jobs:
               echo "Version code exceeds Android maximum (2100000000)."
               exit 1
             fi
-          else
-            VERSION="0.0.0-dev.${GITHUB_RUN_NUMBER}"
-            VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
           fi
           echo "APP_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "APP_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Run unit tests (API 24..36 matrix) and build debug APK
         run: |
@@ -108,7 +132,7 @@ jobs:
           retention-days: 14
 
       - name: Restore release signing key
-        if: github.ref_type == 'tag'
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -117,7 +141,7 @@ jobs:
           chmod 600 "$GITHUB_WORKSPACE/my-upload-key.jks"
 
       - name: Build signed release APK
-        if: github.ref_type == 'tag'
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -127,19 +151,20 @@ jobs:
           test -n "$STORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD repository secret" && exit 1)
           test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD repository secret" && exit 1)
           test -n "$KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS repository secret" && exit 1)
-          ./gradlew --no-daemon testReleaseUnitTest assembleRelease \
+          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease \
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 
       - name: Verify release APK and generate release-manifest.json
-        if: github.ref_type == 'tag'
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
         shell: bash
         run: |
           set -euo pipefail
           SOURCE_APK="app/build/outputs/apk/release/app-release.apk"
           test -f "$SOURCE_APK" || (echo "Release APK not found at $SOURCE_APK" && exit 1)
 
-          APK_NAME="FolioNote-${GITHUB_REF_NAME}.apk"
+          test -n "$RELEASE_TAG" || (echo "Release tag is missing" && exit 1)
+          APK_NAME="FolioNote-${RELEASE_TAG}.apk"
           mkdir -p dist
           cp "$SOURCE_APK" "dist/$APK_NAME"
 
@@ -175,11 +200,69 @@ jobs:
             "sizeBytes": ${APK_SIZE},
             "sha256": "${APK_SHA256}",
             "signingCertSha256": "${CERT_SHA256}",
-            "tag": "${GITHUB_REF_NAME}",
-            "releaseUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            "tag": "${RELEASE_TAG}",
+            "releaseUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           }
           EOF
           cat dist/release-manifest.json
+
+      - name: Accept Android SDK licenses and install API 24 image for release smoke
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        shell: bash
+        run: |
+          set +e
+          yes | sdkmanager --licenses >/dev/null
+          LICENSE_STATUS=${PIPESTATUS[1]}
+          set -e
+          test "$LICENSE_STATUS" -eq 0
+          set +e
+          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
+          INSTALL_STATUS=${PIPESTATUS[1]}
+          set -e
+          test "$INSTALL_STATUS" -eq 0
+
+      - name: Smoke test signed release APK on API 24 emulator
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 24
+          arch: x86_64
+          target: default
+          profile: Nexus 5X
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb install -r "dist/FolioNote-${RELEASE_TAG}.apk"
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            adb shell am start -n com.sjos.folionote/.MainActivity
+            APP_RUNNING=false
+            for attempt in {1..15}; do
+              if adb shell pidof com.sjos.folionote >/dev/null; then
+                APP_RUNNING=true
+                break
+              fi
+              sleep 1
+            done
+            if [[ "$APP_RUNNING" != "true" ]]; then
+              adb logcat -d -t 1000 | tail -200
+              exit 1
+            fi
+            if adb logcat -d -t 1000 | grep -E "FATAL EXCEPTION|Process: com.sjos.folionote"; then
+              exit 1
+            fi
+
+      - name: Upload signed release preview artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.build_release_preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: FolioNote-release-preview-${{ inputs.release_version }}
+          path: |
+            dist/FolioNote-v${{ inputs.release_version }}.apk
+            dist/release-manifest.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Publish APK and manifest on GitHub Releases
         if: github.ref_type == 'tag'
@@ -197,19 +280,39 @@ jobs:
     name: API 24 Emulator Smoke Test
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: android
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
+      - name: Set up Android SDK command-line tools
         uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: false
+          packages: ''
+
+      - name: Accept Android SDK licenses and install API 24 emulator image
+        shell: bash
+        run: |
+          set +e
+          yes | sdkmanager --licenses >/dev/null
+          LICENSE_STATUS=${PIPESTATUS[1]}
+          set -e
+          test "$LICENSE_STATUS" -eq 0
+
+          set +e
+          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
+          INSTALL_STATUS=${PIPESTATUS[1]}
+          set -e
+          test "$INSTALL_STATUS" -eq 0
+          adb version
 
       - name: Set up Gradle from the committed Wrapper
         uses: gradle/actions/setup-gradle@v4
@@ -234,4 +337,8 @@ jobs:
           profile: Nexus 5X
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
-          script: ./gradlew --no-daemon connectedDebugAndroidTest
+          script: |
+            ./gradlew --no-daemon assembleDebugAndroidTest
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            ./gradlew --offline --no-daemon connectedDebugAndroidTest

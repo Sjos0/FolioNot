@@ -493,7 +493,7 @@ class Phase8OcrAndGroqWhisperTests {
                     language = "pt",
                     encryptedKey = crypto.encrypt("gsk_test_groq_key_12345")
                 )
-                val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta)
+                val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta, allowLoopbackHttpForTests = true)
                 val res = engine.transcribe(audioFile, "audio/mp4")
                 assertTrue("Groq model $modelId failed: ${res.exceptionOrNull()?.message}", res.isSuccess)
                 val call = calls.last()
@@ -521,7 +521,7 @@ class Phase8OcrAndGroqWhisperTests {
             val exported = prefs.exportNonSecretPreferencesJson().toString()
             assertFalse(exported.contains("gsk_test_groq_key_12345"))
 
-            val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta)
+            val engine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), fakeMeta, allowLoopbackHttpForTests = true)
             for (code in listOf(401, 413, 422, 429, 500)) {
                 nextStatus.set(code)
                 nextRetryAfter.set(if (code == 429) "18" else null)
@@ -537,6 +537,41 @@ class Phase8OcrAndGroqWhisperTests {
         } finally {
             prefs.clearAllPrefsForTest()
             server.stop(0)
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `groq refuses non-https remote endpoints before sending the api key`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = AppPreferencesStore(context)
+        val crypto = KeystoreCryptoManager(context)
+        val tempDir = Files.createTempDirectory("folionote_groq_https").toFile()
+        val audioFile = File(tempDir, "secure-test.m4a").apply { writeBytes(ByteArray(1024)) }
+        val fakeMeta = object : MediaMetadataReader {
+            override fun readMetadata(file: File) = MediaMetadataInfo(durationMs = 2_000L, mimeType = "audio/mp4")
+            override fun extractAudioTrack(videoFile: File, outputFile: File) = false
+        }
+
+        try {
+            prefs.clearAllPrefsForTest()
+            prefs.saveTranscriptionConfig(
+                providerType = TranscriptionProviderType.GROQ_WHISPER,
+                endpointUrl = "http://api.groq.com/openai/v1/audio/transcriptions",
+                modelId = "whisper-large-v3-turbo",
+                language = "pt",
+                encryptedKey = crypto.encrypt("gsk_test_https_guard")
+            )
+            val engine = ExternalAudioTranscriptionEngine(
+                preferencesStore = prefs,
+                cryptoManager = crypto,
+                mediaMetadataReader = fakeMeta
+            )
+            val result = engine.transcribe(audioFile, "audio/mp4")
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("HTTPS"))
+        } finally {
+            prefs.clearAllPrefsForTest()
             tempDir.deleteRecursively()
         }
     }
@@ -668,7 +703,8 @@ class Phase8OcrAndGroqWhisperTests {
                 cryptoManager = crypto,
                 baseHttpClient = OkHttpClient(),
                 mediaMetadataReader = fakeMeta,
-                mediaSegmenter = fakeSegmenter
+                mediaSegmenter = fakeSegmenter,
+                allowLoopbackHttpForTests = true
             )
 
             // Run 1 fails at part 3 -> saves partial result & checkpoint, cleans temp chunks
@@ -736,7 +772,7 @@ class Phase8OcrAndGroqWhisperTests {
                 encryptedKey = crypto.encrypt("gsk_video_test")
             )
             val extractor = DocumentExtractor(
-                transcriptionEngine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), noAudioReader),
+                transcriptionEngine = ExternalAudioTranscriptionEngine(prefs, crypto, OkHttpClient(), noAudioReader, allowLoopbackHttpForTests = true),
                 mediaMetadataReader = noAudioReader
             )
             val doc = extractor.extract(videoFile, SourceType.VIDEO)

@@ -30,6 +30,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.net.URI
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.Locale
@@ -213,7 +214,8 @@ class ExternalAudioTranscriptionEngine(
     private val cryptoManager: KeystoreCryptoManager,
     private val baseHttpClient: OkHttpClient = OkHttpClient(),
     private val mediaMetadataReader: MediaMetadataReader = AndroidMediaMetadataReader(),
-    private val mediaSegmenter: MediaSegmenter = AndroidMediaExtractorSegmenter()
+    private val mediaSegmenter: MediaSegmenter = AndroidMediaExtractorSegmenter(),
+    private val allowLoopbackHttpForTests: Boolean = false
 ) : AudioTranscriptionEngine {
 
     override suspend fun transcribe(mediaFile: File, mimeType: String): Result<TranscriptionResult> {
@@ -238,6 +240,13 @@ class ExternalAudioTranscriptionEngine(
         }
 
         val endpoint = settings.transcriptionEndpointUrl.trim()
+        if (settings.transcriptionProviderType == TranscriptionProviderType.GROQ_WHISPER &&
+            !isSecureGroqEndpoint(endpoint)
+        ) {
+            return@withContext Result.failure(
+                IllegalArgumentException("O endpoint da Groq precisa usar HTTPS para proteger sua chave de API.")
+            )
+        }
         val plainKey = cryptoManager.decrypt(settings.transcriptionEncryptedApiKey).trim()
         if (settings.transcriptionProviderType != TranscriptionProviderType.CUSTOM_TRANSCRIPTION_ENDPOINT &&
             plainKey.isBlank()
@@ -412,6 +421,16 @@ class ExternalAudioTranscriptionEngine(
             )
         }
         return Result.failure(cause)
+    }
+
+    private fun isSecureGroqEndpoint(endpoint: String): Boolean {
+        val uri = runCatching { URI(endpoint) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        val scheme = uri.scheme ?: return false
+        if (uri.userInfo != null || uri.fragment != null) return false
+        if (scheme.equals("https", ignoreCase = true)) return true
+        val loopbackHost = host in setOf("localhost", "127.0.0.1", "::1", "[::1]")
+        return allowLoopbackHttpForTests && scheme.equals("http", ignoreCase = true) && loopbackHost
     }
 
     private suspend fun uploadChunkWithTransientRetry(
