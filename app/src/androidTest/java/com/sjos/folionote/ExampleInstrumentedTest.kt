@@ -16,6 +16,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.engine.document.DocumentExtractor
+import kotlinx.coroutines.runBlocking
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -130,8 +131,10 @@ class ExampleInstrumentedTest {
                     }
 
                     val app = context.applicationContext as FolioNoteApp
-                    val extractedPdf = DocumentExtractor(ocrEngine = app.container.ocrEngine)
-                        .extract(scannedPdf, SourceType.PDF)
+                    val extractedPdf = runBlocking {
+                        DocumentExtractor(ocrEngine = app.container.ocrEngine)
+                            .extract(scannedPdf, SourceType.PDF)
+                    }
                     assertTrue(
                         "Bundled OCR did not recognize scanned PDF text while offline: ${extractedPdf.fullText}",
                         extractedPdf.fullText.contains("FOLIO", ignoreCase = true)
