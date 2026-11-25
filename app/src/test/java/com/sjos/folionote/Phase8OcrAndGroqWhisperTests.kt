@@ -673,12 +673,12 @@ class Phase8OcrAndGroqWhisperTests {
         val workDir = File(tempDir, "segments")
         try {
             val originalBytes = createSyntheticPcmWav(
-                wavFile = wavFile,
+                file = wavFile,
                 sampleRate = 8_000,
                 durationSeconds = 601
             )
             val plan = AndroidMediaExtractorSegmenter().trySplitWavPcm(
-                file = wavFile,
+                wavFile = wavFile,
                 preferredDurationMs = TranscriptionLimits.GROQ_MAX_PART_DURATION_MS,
                 overlapMs = 3_000L,
                 maxBytesPerChunk = 12_000_000L,
