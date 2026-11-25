@@ -545,7 +545,7 @@ class Phase8OcrAndGroqWhisperTests {
     fun `groq refuses non-https remote endpoints before sending the api key`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = AppPreferencesStore(context)
-        val crypto = KeystoreCryptoManager(context)
+        val crypto = KeystoreCryptoManager()
         val tempDir = Files.createTempDirectory("folionote_groq_https").toFile()
         val audioFile = File(tempDir, "secure-test.m4a").apply { writeBytes(ByteArray(1024)) }
         val fakeMeta = object : MediaMetadataReader {
