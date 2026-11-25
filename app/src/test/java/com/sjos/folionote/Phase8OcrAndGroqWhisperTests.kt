@@ -15,6 +15,8 @@ import com.sjos.folionote.engine.document.AudioChunkSpec
 import com.sjos.folionote.engine.document.CompletedChunkTranscript
 import com.sjos.folionote.engine.document.ConfigurableExternalOcrEngine
 import com.sjos.folionote.engine.document.DocumentExtractor
+import com.sjos.folionote.engine.document.ExtractedPage
+import com.sjos.folionote.engine.document.OcrEngine
 import com.sjos.folionote.engine.document.ExternalAudioTranscriptionEngine
 import com.sjos.folionote.engine.document.LocalTextRecognizer
 import com.sjos.folionote.engine.document.MediaMetadataInfo
@@ -676,7 +678,7 @@ class Phase8OcrAndGroqWhisperTests {
                 durationSeconds = 601
             )
             val plan = AndroidMediaExtractorSegmenter().trySplitWavPcm(
-                wavFile = wavFile,
+                file = wavFile,
                 preferredDurationMs = TranscriptionLimits.GROQ_MAX_PART_DURATION_MS,
                 overlapMs = 3_000L,
                 maxBytesPerChunk = 12_000_000L,
