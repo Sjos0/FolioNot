@@ -85,6 +85,10 @@ class DocumentExtractor(
                 pages.add(ExtractedPage(pageNumber = page, text = raw))
             }
 
+            val pdfMetadata = mutableMapOf("pages" to totalPages.toString())
+            doc.documentInformation?.title?.takeIf { it.isNotBlank() }?.let { pdfMetadata["pdf_title"] = it }
+            doc.documentInformation?.author?.takeIf { it.isNotBlank() }?.let { pdfMetadata["pdf_author"] = it }
+
             val totalChars = pages.sumOf { it.text.count { ch -> !ch.isWhitespace() } }
             if (totalChars < 15 && totalPages > 0) {
                 onProgress("Reconhecendo texto das páginas (OCR)...")
@@ -93,11 +97,11 @@ class DocumentExtractor(
                     val summary = ocrRes.getOrThrow()
                     val joined = summary.pages.filter { it.text.isNotBlank() }
                         .joinToString("\n\n") { "[Página ${it.pageNumber}]\n${it.text}" }
-                    val meta = mutableMapOf(
-                        "pages" to summary.pages.size.coerceAtLeast(1).toString(),
-                        "ocr" to "true",
-                        "ocr_provider" to summary.providerUsed
-                    )
+                    val meta = pdfMetadata.toMutableMap().apply {
+                        put("pages", summary.pages.size.coerceAtLeast(1).toString())
+                        put("ocr", "true")
+                        put("ocr_provider", summary.providerUsed)
+                    }
                     if (summary.failedPages.isNotEmpty()) {
                         meta["ocr_failed_pages"] = summary.failedPages.keys.sorted().joinToString(",")
                     }
@@ -121,14 +125,12 @@ class DocumentExtractor(
                     pages = pages,
                     fullText = "",
                     requiresOcr = true,
-                    metadata = mapOf("pages" to totalPages.toString(), "ocr_needed" to "true"),
+                    metadata = pdfMetadata + ("ocr_needed" to "true"),
                     partialError = errMsg
                 )
             }
 
-            val meta = mutableMapOf("pages" to totalPages.toString())
-            doc.documentInformation?.title?.takeIf { it.isNotBlank() }?.let { meta["pdf_title"] = it }
-            doc.documentInformation?.author?.takeIf { it.isNotBlank() }?.let { meta["pdf_author"] = it }
+            val meta = pdfMetadata
 
             val joined = pages.filter { it.text.isNotBlank() }
                 .joinToString("\n\n") { "[Página ${it.pageNumber}]\n${it.text}" }

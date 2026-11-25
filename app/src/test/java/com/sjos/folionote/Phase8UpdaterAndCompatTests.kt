@@ -64,7 +64,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [24, 25, 26, 36])
+@Config(sdk = [24, 25, 26, 27, 28, 35, 36])
 class Phase8ApiCompatMatrixTests {
 
     @Test
@@ -155,6 +155,16 @@ class Phase8ApiCompatMatrixTests {
         assertEquals(1, digests.size)
         assertEquals(64, digests.first().length)
     }
+    @Test
+    fun `installed signing certificate lookup is safe across legacy and modern PackageManager APIs`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val fingerprints = AndroidApkSignatureVerifier(context).getInstalledSigningCertSha256List()
+
+        // Robolectric package archives may omit signing data. The compatibility contract is
+        // that the API-specific lookup never crashes and every fingerprint it does expose is SHA-256.
+        assertTrue("Every available certificate fingerprint must be SHA-256", fingerprints.all { it.length == 64 })
+    }
+
     @Test
     fun `extractor flags are safely translated to codec flags across API levels`() {
         assertEquals(
@@ -449,6 +459,7 @@ class Phase8UpdaterEngineTests {
         val simulateCanInstall = AtomicBoolean(false)
 
         val streamStartedLatch = AtomicReference(CountDownLatch(1))
+        val lastAssetRangeHeader = AtomicReference<String?>(null)
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/") { ex ->
             when (ex.requestURI.path) {
@@ -467,19 +478,33 @@ class Phase8UpdaterEngineTests {
                     ex.responseBody.use { it.write(body) }
                 }
                 "/assets/FolioNote-v1.2.0.apk" -> {
+                    lastAssetRangeHeader.set(ex.requestHeaders.getFirst("Range"))
                     if (interruptMidStream.get()) {
                         ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
                         ex.responseBody.write(tempApkPayload, 0, 8192)
                         ex.responseBody.flush()
                         ex.close()
                     } else {
-                        ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
-                        ex.responseBody.use { out ->
-                            out.write(tempApkPayload, 0, 16384)
-                            out.flush()
-                            streamStartedLatch.get().countDown()
-                            Thread.sleep(150)
-                            out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
+                        val rangeHeader = ex.requestHeaders.getFirst("Range")
+                        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                            val offset = rangeHeader.removePrefix("bytes=").removeSuffix("-").toInt()
+                            ex.responseHeaders.add(
+                                "Content-Range",
+                                "bytes $offset-${tempApkPayload.lastIndex}/${tempApkPayload.size}"
+                            )
+                            ex.sendResponseHeaders(206, (tempApkPayload.size - offset).toLong())
+                            ex.responseBody.use { out ->
+                                out.write(tempApkPayload, offset, tempApkPayload.size - offset)
+                            }
+                        } else {
+                            ex.sendResponseHeaders(200, tempApkPayload.size.toLong())
+                            ex.responseBody.use { out ->
+                                out.write(tempApkPayload, 0, 16384)
+                                out.flush()
+                                streamStartedLatch.get().countDown()
+                                Thread.sleep(500)
+                                out.write(tempApkPayload, 16384, tempApkPayload.size - 16384)
+                            }
                         }
                     }
                 }
@@ -539,6 +564,17 @@ class Phase8UpdaterEngineTests {
                 assertTrue("Asset request did not reach the local test server", streamStartedLatch.get().await(5, TimeUnit.SECONDS))
             }
             withTimeout(5_000L) {
+                while (true) {
+                    val current = manager.uiState.value
+                    if (current is UpdateUiState.Downloading && current.bytesDownloaded > 0L) break
+                    delay(10L)
+                }
+            }
+            val progress = manager.uiState.value as UpdateUiState.Downloading
+            assertTrue("Download progress must reflect bytes actually written", progress.bytesDownloaded > 0L)
+            assertEquals(tempApkPayload.size.toLong(), progress.totalBytes)
+            assertTrue("The first streamed chunk must not be reported as complete", progress.percent in 1..99)
+            withTimeout(5_000L) {
                 while (!File(updatesFolder, "FolioNote-update.apk.part").exists() ||
                     File(updatesFolder, "FolioNote-update.apk.part").length() == 0L
                 ) delay(10L)
@@ -553,13 +589,18 @@ class Phase8UpdaterEngineTests {
             assertTrue(manager.uiState.value is UpdateUiState.Paused)
             interruptMidStream.set(false)
 
-            // 3. Verification failure deletes corrupted/untrusted APK & fails cleanly
+            // 3. Retry resumes from the saved byte offset using HTTP Range / 206.
+            manager.downloadAndVerifyInternal(update)
+            assertEquals("bytes=8192-", lastAssetRangeHeader.get())
+            assertTrue(manager.uiState.value is UpdateUiState.AwaitingInstallPermission)
+
+            // 4. Verification failure deletes corrupted/untrusted APK & fails cleanly
             failVerification.set(true)
             manager.downloadAndVerifyInternal(update)
             assertTrue(manager.uiState.value is UpdateUiState.Failed)
             assertFalse(File(updatesFolder, "FolioNote-update-1002000.apk").exists())
 
-            // 3. Valid download -> AwaitingInstallPermission -> user grants -> ReadyToInstall
+            // 5. Valid download -> AwaitingInstallPermission -> user grants -> ReadyToInstall
             failVerification.set(false)
             simulateCanInstall.set(false)
             manager.downloadAndVerifyInternal(update)

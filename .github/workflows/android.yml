@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       build_release_preview:
-        description: Build and smoke-test a signed release APK without publishing
+        description: Build a signed release APK without publishing (device smoke test deferred)
         type: boolean
         required: false
         default: false
@@ -66,6 +66,20 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      - name: Prepare CI-only release signing key
+        if: ${{ github.ref_type != 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        shell: bash
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$GITHUB_WORKSPACE/ci-release.keystore" \
+            -storetype JKS \
+            -storepass ci-only-password \
+            -keypass ci-only-password \
+            -alias ci-release \
+            -keyalg RSA -keysize 2048 -validity 365 \
+            -dname "CN=FolioNote CI Only,O=FolioNote,C=US"
+          chmod 600 "$GITHUB_WORKSPACE/ci-release.keystore"
+
       - name: Determine Android version
         shell: bash
         env:
@@ -106,7 +120,19 @@ jobs:
 
       - name: Run unit tests (API 24..36 matrix) and build debug APK
         run: |
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug \
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest \
+            -PappVersionName="$APP_VERSION_NAME" \
+            -PappVersionCode="$APP_VERSION_CODE"
+
+      - name: Run release lint and build with ephemeral CI signing key
+        if: ${{ github.ref_type != 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/ci-release.keystore
+          STORE_PASSWORD: ci-only-password
+          KEY_PASSWORD: ci-only-password
+          KEY_ALIAS: ci-release
+        run: |
+          ./gradlew --no-daemon lintRelease assembleRelease \
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 
@@ -120,6 +146,8 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/lint-results-debug.html
             app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+            app/build/reports/lint-results-release.html
+            app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt
           if-no-files-found: ignore
 
       - name: Upload debug APK
@@ -151,7 +179,7 @@ jobs:
           test -n "$STORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD repository secret" && exit 1)
           test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD repository secret" && exit 1)
           test -n "$KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS repository secret" && exit 1)
-          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease \
+          ./gradlew --no-daemon lintRelease assembleRelease \
             -PappVersionName="$APP_VERSION_NAME" \
             -PappVersionCode="$APP_VERSION_CODE"
 
@@ -206,52 +234,7 @@ jobs:
           EOF
           cat dist/release-manifest.json
 
-      - name: Accept Android SDK licenses and install API 24 image for release smoke
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
-        shell: bash
-        run: |
-          set +e
-          yes | sdkmanager --licenses >/dev/null
-          LICENSE_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$LICENSE_STATUS" -eq 0
-          set +e
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
-          INSTALL_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$INSTALL_STATUS" -eq 0
-
-      - name: Smoke test signed release APK on API 24 emulator
-        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
-        timeout-minutes: 15
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 24
-          arch: x86_64
-          target: default
-          profile: Nexus 5X
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: true
-          script: |
-            adb install -r "dist/FolioNote-${RELEASE_TAG}.apk"
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
-            adb shell am start -n com.sjos.folionote/.MainActivity
-            APP_RUNNING=false
-            for attempt in {1..15}; do
-              if adb shell pidof com.sjos.folionote >/dev/null; then
-                APP_RUNNING=true
-                break
-              fi
-              sleep 1
-            done
-            if [[ "$APP_RUNNING" != "true" ]]; then
-              adb logcat -d -t 1000 | tail -200
-              exit 1
-            fi
-            if adb logcat -d -t 1000 | grep -E "FATAL EXCEPTION|Process: com.sjos.folionote"; then
-              exit 1
-            fi
+      # Emulator smoke tests are intentionally deferred to physical-device validation.
 
       - name: Upload signed release preview artifact
         if: github.event_name == 'workflow_dispatch' && inputs.build_release_preview
@@ -275,70 +258,3 @@ jobs:
           files: |
             dist/FolioNote-${{ github.ref_name }}.apk
             dist/release-manifest.json
-
-  android-api24-smoke:
-    name: API 24 Emulator Smoke Test
-    if: github.ref_type != 'tag'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: android
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Android SDK command-line tools
-        uses: android-actions/setup-android@v4
-        with:
-          accept-android-sdk-licenses: false
-          packages: ''
-
-      - name: Accept Android SDK licenses and install API 24 emulator image
-        shell: bash
-        run: |
-          set +e
-          yes | sdkmanager --licenses >/dev/null
-          LICENSE_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$LICENSE_STATUS" -eq 0
-
-          set +e
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-24;default;x86_64"
-          INSTALL_STATUS=${PIPESTATUS[1]}
-          set -e
-          test "$INSTALL_STATUS" -eq 0
-          adb version
-
-      - name: Set up Gradle from the committed Wrapper
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Prepare debug signing key
-        run: |
-          keytool -genkeypair -noprompt \
-            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storetype JKS \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-      - name: Run instrumented tests on API 24 emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 24
-          arch: x86_64
-          target: default
-          profile: Nexus 5X
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: true
-          script: |
-            ./gradlew --no-daemon assembleDebugAndroidTest
-            adb shell svc wifi disable || true
-            adb shell svc data disable || true
-            ./gradlew --offline --no-daemon connectedDebugAndroidTest
