@@ -176,7 +176,7 @@ class AndroidMediaMetadataReader : MediaMetadataReader {
                 bufferInfo.offset = 0
                 bufferInfo.size = sampleSize
                 bufferInfo.presentationTimeUs = extractor.sampleTime.coerceAtLeast(0L)
-                bufferInfo.flags = extractor.sampleFlags
+                bufferInfo.flags = mapExtractorSampleFlagsToCodecBufferFlags(extractor.sampleFlags)
                 muxer.writeSampleData(dstTrack, buffer, bufferInfo)
                 extractor.advance()
             }

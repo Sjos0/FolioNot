@@ -1,6 +1,8 @@
 package com.sjos.folionote
 
 import android.app.Activity
+import android.media.MediaExtractor
+import android.media.MediaCodec
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.Signature
@@ -13,6 +15,7 @@ import com.sjos.folionote.core.security.KeystoreCryptoManager
 import com.sjos.folionote.data.local.FolioNoteDatabase
 import com.sjos.folionote.data.local.NotebookEntity
 import com.sjos.folionote.engine.document.FileStorageManager
+import com.sjos.folionote.engine.document.mapExtractorSampleFlagsToCodecBufferFlags
 import com.sjos.folionote.engine.drive.GoogleConnectOutcome
 import com.sjos.folionote.engine.drive.GoogleDriveAuthManager
 import com.sjos.folionote.engine.drive.GoogleCredentialAuthenticator
@@ -43,6 +46,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -151,6 +155,23 @@ class Phase8ApiCompatMatrixTests {
         assertEquals(1, digests.size)
         assertEquals(64, digests.first().length)
     }
+    @Test
+    fun `extractor flags are safely translated to codec flags across API levels`() {
+        assertEquals(
+            MediaCodec.BUFFER_FLAG_KEY_FRAME,
+            mapExtractorSampleFlagsToCodecBufferFlags(MediaExtractor.SAMPLE_FLAG_SYNC)
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            mapExtractorSampleFlagsToCodecBufferFlags(MediaExtractor.SAMPLE_FLAG_ENCRYPTED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            assertEquals(
+                MediaCodec.BUFFER_FLAG_PARTIAL_FRAME,
+                mapExtractorSampleFlagsToCodecBufferFlags(MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME)
+            )
+        }
+    }
+
 }
 
 @RunWith(RobolectricTestRunner::class)

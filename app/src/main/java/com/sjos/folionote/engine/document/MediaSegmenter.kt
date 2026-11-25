@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.os.Build
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -53,6 +54,24 @@ interface MediaSegmenter {
         maxPartBytes: Long,
         workDir: File
     ): SegmentationPlanResult
+}
+
+/** Converts extractor sample flags to the distinct MediaCodec.BufferInfo flag space. */
+internal fun mapExtractorSampleFlagsToCodecBufferFlags(sampleFlags: Int): Int {
+    if ((sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED) != 0) {
+        throw IllegalArgumentException("Encrypted media samples cannot be segmented safely")
+    }
+
+    var codecFlags = 0
+    if ((sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
+        codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        (sampleFlags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME) != 0
+    ) {
+        codecFlags = codecFlags or MediaCodec.BUFFER_FLAG_PARTIAL_FRAME
+    }
+    return codecFlags
 }
 
 /**
@@ -226,7 +245,7 @@ class AndroidMediaExtractorSegmenter : MediaSegmenter {
                         bufferInfo.offset = 0
                         bufferInfo.size = sampleSize
                         bufferInfo.presentationTimeUs = (sampleUs - firstSampleUs).coerceAtLeast(0L)
-                        bufferInfo.flags = extractor.sampleFlags
+                        bufferInfo.flags = mapExtractorSampleFlagsToCodecBufferFlags(extractor.sampleFlags)
                         muxer.writeSampleData(dstTrack, buffer, bufferInfo)
                         samplesWritten++
                         partEndUs = sampleUs

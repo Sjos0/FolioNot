@@ -108,6 +108,7 @@ dependencies {
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.pdfbox.android)
   implementation(libs.mlkit.text.recognition)
+  implementation(libs.androidx.exifinterface)
   implementation(libs.coil.compose)
   // implementation(libs.androidx.browser)
   implementation(libs.play.services.auth)
