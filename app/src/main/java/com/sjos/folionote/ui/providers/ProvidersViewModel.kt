@@ -245,6 +245,10 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setActiveEmbeddingModel(modelInternalId: String?) {
         viewModelScope.launch {
+            if (modelInternalId == null) {
+                // Escolher BM25 precisa desligar a Gemini Embedding, senão ela continua sendo usada.
+                prefsStore.setGeminiEmbeddingEnabled(false)
+            }
             prefsStore.setActiveEmbeddingModelId(modelInternalId)
             statusMessage.value = if (modelInternalId == null) {
                 "Modo lexical offline selecionado para buscas."

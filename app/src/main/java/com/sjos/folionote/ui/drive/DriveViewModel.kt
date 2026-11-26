@@ -12,6 +12,7 @@ import com.sjos.folionote.engine.drive.DriveFileItem
 import com.sjos.folionote.engine.drive.DriveSyncRuntimeState
 import com.sjos.folionote.engine.drive.DriveSyncWorker
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -49,7 +50,7 @@ class DriveViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            if (uiState.value.settings.isGoogleDriveConnected) {
+            if (prefsStore.settingsFlow.first().isGoogleDriveConnected) {
                 driveSync.refreshBackupList()
             }
         }

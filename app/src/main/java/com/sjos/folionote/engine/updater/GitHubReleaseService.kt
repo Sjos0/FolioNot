@@ -3,6 +3,7 @@ package com.sjos.folionote.engine.updater
 import android.os.Build
 import com.sjos.folionote.core.network.RequestTimeoutSpec
 import com.sjos.folionote.core.network.SharedHttpClients
+import com.sjos.folionote.core.network.UrlAllowlistPolicy
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,7 @@ class GitHubReleaseService(
                 val reqBuilder = Request.Builder()
                     .url(latestReleaseUrl)
                     .tag(RequestTimeoutSpec::class.java, timeoutSpec)
+                    .tag(UrlAllowlistPolicy::class.java, SharedHttpClients.updaterUrlPolicy)
                     .header("Accept", "application/vnd.github+json")
                     .header("X-GitHub-Api-Version", UpdaterContract.GITHUB_API_VERSION)
                     .header("User-Agent", "FolioNote-Android/${installedInfo.versionName}")
@@ -254,6 +256,7 @@ class GitHubReleaseService(
         val req = Request.Builder()
             .url(url)
             .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(connectTimeoutSeconds = 15, readTimeoutSeconds = 20))
+            .tag(UrlAllowlistPolicy::class.java, SharedHttpClients.updaterUrlPolicy)
             .header("Accept", "application/json")
             .header("User-Agent", "FolioNote-Android/$versionName")
             .build()
