@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.StatFs
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +28,6 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -36,7 +37,7 @@ import kotlin.coroutines.coroutineContext
  */
 class AppUpdateManager(
     private val context: Context,
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val releaseService: GitHubReleaseService,
     private val apkVerifier: ApkVerifier = AndroidApkSignatureVerifier(context),
     private val sdkIntProvider: () -> Int = { Build.VERSION.SDK_INT },
@@ -311,19 +312,18 @@ class AppUpdateManager(
         }
 
         try {
-            val client = baseHttpClient.newBuilder()
-                .connectTimeout(20, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .build()
-
             val reqBuilder = Request.Builder()
                 .url(downloadUrl)
+                .tag(
+                    RequestTimeoutSpec::class.java,
+                    RequestTimeoutSpec(connectTimeoutSeconds = 20, readTimeoutSeconds = 60)
+                )
                 .header("User-Agent", "FolioNote-Android/${apkVerifier.getInstalledAppInfo().versionName}")
             if (resumeOffset > 0L) {
                 reqBuilder.header("Range", "bytes=$resumeOffset-")
             }
 
-            val call = client.newCall(reqBuilder.build())
+            val call = baseHttpClient.newCall(reqBuilder.build())
             activeDownloadCall = call
 
             call.execute().use { resp ->

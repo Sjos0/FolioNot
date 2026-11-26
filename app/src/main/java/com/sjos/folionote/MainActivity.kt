@@ -158,7 +158,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val appContainer = (application as FolioNoteApp).container
-        appContainer.appUpdateManager.checkForUpdatesAutomatically()
         handleIncomingIntent(intent, appContainer)
     }
 

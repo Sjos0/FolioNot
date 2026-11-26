@@ -366,8 +366,16 @@ class NotebookRepository(
     suspend fun searchLexicalInNotebook(notebookId: String, query: String): List<RetrievedPassage> =
         withContext(Dispatchers.IO) {
             val sources = sourceDao.getSourcesForNotebookOnce(notebookId)
-            val chunks = chunkDao.getChunksForNotebookOnce(notebookId)
-            retriever.searchLexicalOffline(query, sources, chunks, limit = 30)
+            retriever.searchLexicalOnDemand(
+                query = query,
+                sources = sources,
+                limit = 30,
+                pageSize = 64,
+                loadChunkPage = { limit, offset ->
+                    chunkDao.getChunksPageForNotebook(notebookId, limit, offset)
+                },
+                loadChunksByIds = { ids -> chunkDao.getChunksByIds(ids) }
+            )
         }
 
     fun getStorageStats(usedBytes: Long): StorageStats {

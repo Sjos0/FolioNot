@@ -1,16 +1,18 @@
 package com.sjos.folionote.engine.updater
 
 import android.os.Build
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 internal fun shouldRunAutomaticReleaseCheck(
     lastCheckedAt: Long,
@@ -19,7 +21,7 @@ internal fun shouldRunAutomaticReleaseCheck(
 ): Boolean = lastCheckedAt <= 0L || now < lastCheckedAt || now - lastCheckedAt >= intervalMs
 
 class GitHubReleaseService(
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val preferencesStore: AppPreferencesStore? = null,
     private val latestReleaseUrl: String = UpdaterContract.LATEST_RELEASE_ENDPOINT,
     private val deviceSdkProvider: () -> Int = { Build.VERSION.SDK_INT },
@@ -28,7 +30,12 @@ class GitHubReleaseService(
 ) {
 
     suspend fun isAutomaticCheckDue(): Boolean {
-        val lastCheckedAt = preferencesStore?.getReleaseCheckCache()?.lastCheckedAt ?: 0L
+        val prefs = preferencesStore
+        if (prefs != null) {
+            val enabled = prefs.settingsFlow.first().autoCheckUpdatesEnabled
+            if (!enabled) return false
+        }
+        val lastCheckedAt = prefs?.getReleaseCheckCache()?.lastCheckedAt ?: 0L
         return shouldRunAutomaticReleaseCheck(lastCheckedAt, nowProvider())
     }
 
@@ -36,13 +43,11 @@ class GitHubReleaseService(
         withContext(Dispatchers.IO) {
             try {
                 val cached = preferencesStore?.getReleaseCheckCache()
-                val client = baseHttpClient.newBuilder()
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(20, TimeUnit.SECONDS)
-                    .build()
+                val timeoutSpec = RequestTimeoutSpec(connectTimeoutSeconds = 15, readTimeoutSeconds = 20)
 
                 val reqBuilder = Request.Builder()
                     .url(latestReleaseUrl)
+                    .tag(RequestTimeoutSpec::class.java, timeoutSpec)
                     .header("Accept", "application/vnd.github+json")
                     .header("X-GitHub-Api-Version", UpdaterContract.GITHUB_API_VERSION)
                     .header("User-Agent", "FolioNote-Android/${installedInfo.versionName}")
@@ -51,7 +56,7 @@ class GitHubReleaseService(
                     reqBuilder.header("If-None-Match", cached!!.etag!!)
                 }
 
-                val payload: GitHubReleasePayload = client.newCall(reqBuilder.build()).execute().use { resp ->
+                val payload: GitHubReleasePayload = baseHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
                     when (resp.code) {
                         304 -> {
                             val cachedBody = cached?.cachedJson
@@ -108,7 +113,7 @@ class GitHubReleaseService(
                 )
 
                 validateAssetDownloadUrl(manifestAsset.browserDownloadUrl)
-                val manifestRaw = fetchTextAsset(client, manifestAsset.browserDownloadUrl, installedInfo.versionName)
+                val manifestRaw = fetchTextAsset(manifestAsset.browserDownloadUrl, installedInfo.versionName)
                 val manifest = ReleaseManifest.parseAndValidate(manifestRaw).getOrThrow()
                 require(manifest.tag == payload.tagName) {
                     "Manifesto rejeitado: tag (${manifest.tag}) diverge do release consultado (${payload.tagName})."
@@ -245,13 +250,14 @@ class GitHubReleaseService(
         }
     }
 
-    private fun fetchTextAsset(client: OkHttpClient, url: String, versionName: String): String {
+    private fun fetchTextAsset(url: String, versionName: String): String {
         val req = Request.Builder()
             .url(url)
+            .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(connectTimeoutSeconds = 15, readTimeoutSeconds = 20))
             .header("Accept", "application/json")
             .header("User-Agent", "FolioNote-Android/$versionName")
             .build()
-        return client.newCall(req).execute().use { resp ->
+        return baseHttpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Falha ao baixar manifesto do release (HTTP ${resp.code}).")
             }

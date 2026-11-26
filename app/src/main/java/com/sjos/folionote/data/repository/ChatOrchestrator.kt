@@ -3,7 +3,6 @@ package com.sjos.folionote.data.repository
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.data.local.CitationEntity
 import com.sjos.folionote.data.local.ConversationEntity
-import com.sjos.folionote.data.local.EmbeddingEntity
 import com.sjos.folionote.data.local.FolioNoteDatabase
 import com.sjos.folionote.data.local.MessageEntity
 import com.sjos.folionote.data.local.MessageRole
@@ -70,6 +69,12 @@ class ChatOrchestrator(
     private val toolEngine: ToolEngine,
     private val preferencesStore: AppPreferencesStore
 ) {
+    companion object {
+        internal const val MAX_HISTORY_WINDOW_MESSAGES = 40
+        internal const val RAG_PAGE_SIZE = 64
+        internal const val STUDIO_CHUNK_PAGE_SIZE = 32
+    }
+
     private val conversationDao = db.conversationAndMessageDao()
     private val providerDao = db.providerAndModelDao()
     private val sourceDao = db.sourceDao()
@@ -195,9 +200,9 @@ class ChatOrchestrator(
         conversationId: String,
         modelInternalId: String
     ) {
-        val messages = conversationDao.getMessagesForConversationOnce(conversationId)
-        val lastUser = messages.lastOrNull { it.role == MessageRole.USER.name } ?: return
-        val lastAssistant = messages.lastOrNull { it.role == MessageRole.ASSISTANT.name }
+        val recentMessages = conversationDao.getRecentMessagesForConversationDesc(conversationId, 16).asReversed()
+        val lastUser = recentMessages.lastOrNull { it.role == MessageRole.USER.name } ?: return
+        val lastAssistant = recentMessages.lastOrNull { it.role == MessageRole.ASSISTANT.name }
         if (lastAssistant != null && lastAssistant.orderIndex > lastUser.orderIndex) {
             conversationDao.deleteMessageById(lastAssistant.id)
         }
@@ -348,25 +353,32 @@ class ChatOrchestrator(
 
         try {
             val conversation = conversationDao.getConversationById(conversationId) ?: return
-            val fullHistory = conversationDao.getMessagesForConversationOnce(conversationId)
+            val recentWindow = conversationDao.getRecentMessagesForConversationDesc(
+                conversationId = conversationId,
+                limit = MAX_HISTORY_WINDOW_MESSAGES + 2
+            ).asReversed()
+            val currentTurnOrder = recentWindow
+                .lastOrNull { it.role == MessageRole.USER.name && it.content == userQuery }
+                ?.orderIndex
+                ?: (conversationDao.getMaxOrderIndex(conversationId) + 1)
+            val boundedHistory = recentWindow
                 .dropLastWhile { it.role == MessageRole.USER.name && it.content == userQuery }
+                .takeLast(MAX_HISTORY_WINDOW_MESSAGES)
 
             val settings = preferencesStore.settingsFlow.first()
             val selectedSources = sourceDao.getSelectedReadySources(notebookId)
             val sourceIds = selectedSources.map { it.id }
 
-            val chunks = if (sourceIds.isNotEmpty()) {
-                chunkDao.getChunksForSources(sourceIds)
-            } else {
-                emptyList()
-            }
+            val hasChunks = sourceIds.isNotEmpty() &&
+                chunkDao.getChunksPageForSources(sourceIds, limit = 1, offset = 0).isNotEmpty()
 
             // Semantic query embedding with RETRIEVAL_QUERY taskType when Gemini Embedding 2 or custom model is active
             var queryEmbedding: FloatArray? = null
-            var storedEmbeddings = emptyList<EmbeddingEntity>()
+            var embModelIdForPaging: String? = null
+            var embDimensionsForPaging = 0
             var retrievalMode = "Lexical offline (BM25)"
             val activeSpec = geminiEmbeddingManager.resolveActiveEmbeddingSpec(settings, providerDao)
-            if (activeSpec != null && chunks.isNotEmpty()) {
+            if (activeSpec != null && hasChunks) {
                 val embModel = activeSpec.model
                 val embProvider = activeSpec.provider
                 val qRes = embeddingProvider.embedTexts(
@@ -379,35 +391,60 @@ class ChatOrchestrator(
                     val vecResult = qRes.getOrThrow()
                     queryEmbedding = vecResult.vectors.firstOrNull()
                     if (vecResult.dimensions > 0) {
-                        storedEmbeddings = chunkDao.getEmbeddingsForSources(
+                        val hasEmbeddings = chunkDao.getEmbeddingsPageForSources(
                             sourceIds = sourceIds,
                             embeddingModelId = embModel.modelId,
-                            dimensions = vecResult.dimensions
-                        )
-                        retrievalMode = if (storedEmbeddings.isNotEmpty()) {
-                            "Híbrido (Semântico ${embModel.modelId} ${vecResult.dimensions}d + BM25)"
+                            dimensions = vecResult.dimensions,
+                            limit = 1,
+                            offset = 0
+                        ).isNotEmpty()
+                        if (hasEmbeddings) {
+                            embModelIdForPaging = embModel.modelId
+                            embDimensionsForPaging = vecResult.dimensions
+                            retrievalMode = "Híbrido (Semântico ${embModel.modelId} ${vecResult.dimensions}d + BM25)"
                         } else {
-                            "Lexical offline (BM25 — reindexe para gerar vetores)"
+                            retrievalMode = "Lexical offline (BM25 — reindexe para gerar vetores)"
                         }
                     }
                 }
             }
             _runtimeState.value = _runtimeState.value.copy(retrievalModeLabel = retrievalMode)
 
-            val passages = retriever.retrieve(
-                query = userQuery,
-                sources = selectedSources,
-                chunks = chunks,
-                embeddings = storedEmbeddings,
-                queryEmbedding = queryEmbedding,
-                topK = settings.ragTopK
-            )
+            val passages = if (hasChunks) {
+                retriever.retrieveOnDemand(
+                    query = userQuery,
+                    sources = selectedSources,
+                    queryEmbedding = queryEmbedding,
+                    topK = settings.ragTopK,
+                    pageSize = RAG_PAGE_SIZE,
+                    loadChunkPage = { limit, offset ->
+                        chunkDao.getChunksPageForSources(sourceIds, limit, offset)
+                    },
+                    loadEmbeddingPage = { limit, offset ->
+                        val modelId = embModelIdForPaging
+                        if (modelId == null || embDimensionsForPaging <= 0) {
+                            emptyList()
+                        } else {
+                            chunkDao.getEmbeddingsPageForSources(
+                                sourceIds = sourceIds,
+                                embeddingModelId = modelId,
+                                dimensions = embDimensionsForPaging,
+                                limit = limit,
+                                offset = offset
+                            )
+                        }
+                    },
+                    loadChunksByIds = { ids -> chunkDao.getChunksByIds(ids) }
+                )
+            } else {
+                emptyList()
+            }
 
             val enabledTools = toolDao.getEnabledToolsOnce()
             val plan = budgetPlanner.buildContextPlan(
                 model = model,
                 conversation = conversation,
-                fullHistory = fullHistory,
+                fullHistory = boundedHistory,
                 userQuery = userQuery,
                 retrievedPassages = passages,
                 enabledTools = enabledTools
@@ -430,9 +467,28 @@ class ChatOrchestrator(
                         activeStatusText = "Conectando a ${provider.name}..."
                     )
 
-                    if (plan.report.needsProgressiveSummary) {
+                    val totalConversationalAfterSummary = (
+                        conversationDao.countConversationalMessagesAfter(
+                            conversationId = conversationId,
+                            afterOrder = conversation.summarizedUpToOrder
+                        ) - 1
+                    ).coerceAtLeast(0)
+                    val totalDroppedSinceSummary = (
+                        totalConversationalAfterSummary - plan.report.includedHistoryCount
+                    ).coerceAtLeast(0)
+
+                    if (plan.report.needsProgressiveSummary || totalDroppedSinceSummary >= 4) {
+                        val keptStartOrder = boundedHistory
+                            .filter {
+                                (it.role == MessageRole.USER.name || it.role == MessageRole.ASSISTANT.name) &&
+                                    !it.isError
+                            }
+                            .let { convMsgs ->
+                                convMsgs.getOrNull((convMsgs.size - plan.report.includedHistoryCount).coerceAtLeast(0))?.orderIndex
+                            }
+                            ?: currentTurnOrder
                         runCatching {
-                            updateProgressiveSummary(conversation, fullHistory, plan.report.includedHistoryCount, model, provider)
+                            updateProgressiveSummary(conversation, keptStartOrder, model, provider)
                         }
                     }
 
@@ -679,8 +735,7 @@ class ChatOrchestrator(
         }
         conversationDao.getConversationById(conversationId)?.let { conv ->
             val updatedTitle = if (conv.title == "Conversa principal" || conv.title == "Nova conversa") {
-                val firstUser = conversationDao.getMessagesForConversationOnce(conversationId)
-                    .firstOrNull { it.role == MessageRole.USER.name }
+                val firstUser = conversationDao.getFirstUserMessageOnce(conversationId)
                 firstUser?.content?.take(44)?.trim()?.ifBlank { conv.title } ?: conv.title
             } else {
                 conv.title
@@ -691,16 +746,19 @@ class ChatOrchestrator(
 
     private suspend fun updateProgressiveSummary(
         conversation: ConversationEntity,
-        fullHistory: List<MessageEntity>,
-        recentKeptCount: Int,
+        beforeOrderExclusive: Int,
         model: ModelEntity,
         provider: ProviderEntity
     ) {
-        val olderMessages = fullHistory.dropLast(recentKeptCount)
-            .filter { it.orderIndex > conversation.summarizedUpToOrder }
+        val olderMessages = conversationDao.getUnsummarizedMessagesInRangeOnce(
+            conversationId = conversation.id,
+            afterOrder = conversation.summarizedUpToOrder,
+            beforeOrder = beforeOrderExclusive,
+            limit = 8
+        )
         if (olderMessages.size < 4) return
 
-        val excerpt = olderMessages.take(8).joinToString("\n") { "${it.role}: ${it.content.take(300)}" }
+        val excerpt = olderMessages.joinToString("\n") { "${it.role}: ${it.content.take(300)}" }
         val prompt = buildString {
             append("Atualize o resumo objetivo desta conversa mantendo fatos, decisões e dúvidas em aberto (máx. 180 palavras).\n")
             if (conversation.runningSummary.isNotBlank()) {
@@ -746,16 +804,28 @@ class ChatOrchestrator(
         if (sources.isEmpty()) {
             return Result.failure(IllegalStateException("Adicione e selecione pelo menos uma fonte processada."))
         }
-        val chunks = chunkDao.getChunksForSources(sources.map { it.id })
+        val sourceIds = sources.map { it.id }
+        val sourceNames = sources.associate { it.id to it.name }
         val budgetChars = com.sjos.folionote.engine.ai.ModelLimitsValidator.computeStudioBudgetChars(
             contextWindow = model.contextWindow,
             maxOutputTokens = model.maxOutputTokens
         )
         val contextJoined = buildString {
-            for (chunk in chunks) {
-                val next = "[${sources.firstOrNull { it.id == chunk.sourceId }?.name ?: "Fonte"} • p.${chunk.pageNumber}]\n${chunk.content}\n\n"
-                if (length + next.length > budgetChars) break
-                append(next)
+            var offset = 0
+            var budgetReached = false
+            while (!budgetReached) {
+                val page = chunkDao.getChunksPageForSources(sourceIds, STUDIO_CHUNK_PAGE_SIZE, offset)
+                if (page.isEmpty()) break
+                for (chunk in page) {
+                    val next = "[${sourceNames[chunk.sourceId] ?: "Fonte"} • p.${chunk.pageNumber}]\n${chunk.content}\n\n"
+                    if (length + next.length > budgetChars) {
+                        budgetReached = true
+                        break
+                    }
+                    append(next)
+                }
+                if (budgetReached || page.size < STUDIO_CHUNK_PAGE_SIZE) break
+                offset += page.size
             }
         }
 

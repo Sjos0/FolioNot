@@ -138,8 +138,16 @@ class ToolEngine(
         val query = args.optString("query", "").trim()
         val limit = args.optInt("limit", 5).coerceIn(1, 10)
         val sources = sourceDao.getSourcesForNotebookOnce(notebookId)
-        val chunks = chunkDao.getChunksForNotebookOnce(notebookId)
-        val matches = retriever.searchLexicalOffline(query, sources, chunks, limit)
+        val matches = retriever.searchLexicalOnDemand(
+            query = query,
+            sources = sources,
+            limit = limit,
+            pageSize = 64,
+            loadChunkPage = { pageLimit, offset ->
+                chunkDao.getChunksPageForNotebook(notebookId, pageLimit, offset)
+            },
+            loadChunksByIds = { ids -> chunkDao.getChunksByIds(ids) }
+        )
 
         val arr = org.json.JSONArray()
         matches.forEach { m ->
@@ -166,7 +174,7 @@ class ToolEngine(
             ?: sources.firstOrNull { it.name.contains(sourceQuery, ignoreCase = true) }
             ?: return ToolExecutionOutcome.Rejected("Fonte '$sourceQuery' não encontrada no notebook.")
 
-        val chunks = chunkDao.getChunksForSources(listOf(source.id)).filter { it.pageNumber == page }
+        val chunks = chunkDao.getChunksForSourcePage(source.id, page)
         val text = if (chunks.isNotEmpty()) {
             chunks.joinToString("\n\n") { it.content }
         } else {

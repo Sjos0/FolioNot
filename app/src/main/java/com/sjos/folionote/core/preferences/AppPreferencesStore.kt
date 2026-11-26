@@ -75,7 +75,8 @@ data class AppSettings(
     val driveLastBackupAt: Long? = null,
     val driveLastSyncAt: Long? = null,
     val driveLastSyncStatus: String = "",
-    val driveLastSyncError: String? = null
+    val driveLastSyncError: String? = null,
+    val autoCheckUpdatesEnabled: Boolean = true
 ) {
     val hasGeminiEmbeddingKey: Boolean
         get() = geminiEmbeddingEncryptedKey.isNotBlank()
@@ -139,6 +140,7 @@ class AppPreferencesStore(private val context: Context) {
         val UPDATER_ETAG = stringPreferencesKey("updater_release_etag")
         val UPDATER_CACHED_JSON = stringPreferencesKey("updater_cached_release_json")
         val UPDATER_LAST_CHECK_AT = longPreferencesKey("updater_last_check_at")
+        val UPDATER_AUTO_CHECK_ENABLED = booleanPreferencesKey("updater_auto_check_enabled")
     }
 
     // Removed legacy OAuth/PKCE preference keys purged during session writes and resets.
@@ -216,7 +218,8 @@ class AppPreferencesStore(private val context: Context) {
             driveLastBackupAt = prefs[Keys.DRIVE_LAST_BACKUP_AT],
             driveLastSyncAt = prefs[Keys.DRIVE_LAST_SYNC_AT],
             driveLastSyncStatus = prefs[Keys.DRIVE_LAST_SYNC_STATUS].orEmpty(),
-            driveLastSyncError = prefs[Keys.DRIVE_LAST_SYNC_ERROR]?.takeIf { it.isNotBlank() }
+            driveLastSyncError = prefs[Keys.DRIVE_LAST_SYNC_ERROR]?.takeIf { it.isNotBlank() },
+            autoCheckUpdatesEnabled = prefs[Keys.UPDATER_AUTO_CHECK_ENABLED] ?: true
         )
     }
 
@@ -355,6 +358,10 @@ class AppPreferencesStore(private val context: Context) {
         }
     }
 
+    suspend fun setAutoCheckUpdatesEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.UPDATER_AUTO_CHECK_ENABLED] = enabled }
+    }
+
     suspend fun saveDriveAccountSession(
         email: String,
         displayName: String?,
@@ -464,6 +471,7 @@ class AppPreferencesStore(private val context: Context) {
             put("transcriptionModelId", current.transcriptionModelId)
             put("transcriptionLanguage", current.transcriptionLanguage)
             put("driveConflictPolicy", current.driveConflictPolicy.name)
+            put("autoCheckUpdatesEnabled", current.autoCheckUpdatesEnabled)
         }
     }
 
@@ -513,6 +521,9 @@ class AppPreferencesStore(private val context: Context) {
             }
             json.optString("driveConflictPolicy").takeIf { it.isNotBlank() }?.let { raw ->
                 runCatching { DriveConflictPolicy.valueOf(raw) }.getOrNull()?.let { prefs[Keys.DRIVE_CONFLICT_POLICY] = it.name }
+            }
+            if (json.has("autoCheckUpdatesEnabled")) {
+                prefs[Keys.UPDATER_AUTO_CHECK_ENABLED] = json.optBoolean("autoCheckUpdatesEnabled", true)
             }
         }
     }

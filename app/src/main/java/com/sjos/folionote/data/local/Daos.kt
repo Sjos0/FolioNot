@@ -113,8 +113,20 @@ interface ChunkAndEmbeddingDao {
     @Query("SELECT * FROM document_chunks WHERE sourceId IN (:sourceIds)")
     suspend fun getChunksForSources(sourceIds: List<String>): List<DocumentChunkEntity>
 
+    @Query("SELECT * FROM document_chunks WHERE sourceId IN (:sourceIds) ORDER BY sourceId ASC, chunkIndex ASC LIMIT :limit OFFSET :offset")
+    suspend fun getChunksPageForSources(sourceIds: List<String>, limit: Int, offset: Int): List<DocumentChunkEntity>
+
     @Query("SELECT * FROM document_chunks WHERE notebookId = :notebookId")
     suspend fun getChunksForNotebookOnce(notebookId: String): List<DocumentChunkEntity>
+
+    @Query("SELECT * FROM document_chunks WHERE notebookId = :notebookId ORDER BY sourceId ASC, chunkIndex ASC LIMIT :limit OFFSET :offset")
+    suspend fun getChunksPageForNotebook(notebookId: String, limit: Int, offset: Int): List<DocumentChunkEntity>
+
+    @Query("SELECT * FROM document_chunks WHERE sourceId = :sourceId AND pageNumber = :pageNumber ORDER BY chunkIndex ASC")
+    suspend fun getChunksForSourcePage(sourceId: String, pageNumber: Int): List<DocumentChunkEntity>
+
+    @Query("SELECT * FROM document_chunks WHERE id IN (:chunkIds)")
+    suspend fun getChunksByIds(chunkIds: List<String>): List<DocumentChunkEntity>
 
     @Query("SELECT * FROM document_chunks WHERE id = :chunkId LIMIT 1")
     suspend fun getChunkById(chunkId: String): DocumentChunkEntity?
@@ -130,6 +142,15 @@ interface ChunkAndEmbeddingDao {
         sourceIds: List<String>,
         embeddingModelId: String,
         dimensions: Int
+    ): List<EmbeddingEntity>
+
+    @Query("SELECT * FROM embeddings WHERE sourceId IN (:sourceIds) AND embeddingModelId = :embeddingModelId AND dimensions = :dimensions ORDER BY chunkId ASC LIMIT :limit OFFSET :offset")
+    suspend fun getEmbeddingsPageForSources(
+        sourceIds: List<String>,
+        embeddingModelId: String,
+        dimensions: Int,
+        limit: Int,
+        offset: Int
     ): List<EmbeddingEntity>
 
     @Query("SELECT * FROM embeddings WHERE notebookId = :notebookId")
@@ -231,6 +252,23 @@ interface ConversationAndMessageDao {
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY orderIndex ASC, createdAt ASC")
     suspend fun getMessagesForConversationOnce(conversationId: String): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY orderIndex DESC, createdAt DESC LIMIT :limit")
+    suspend fun getRecentMessagesForConversationDesc(conversationId: String, limit: Int): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId AND role = 'USER' ORDER BY orderIndex ASC, createdAt ASC LIMIT 1")
+    suspend fun getFirstUserMessageOnce(conversationId: String): MessageEntity?
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId AND orderIndex > :afterOrder AND orderIndex < :beforeOrder AND role IN ('USER', 'ASSISTANT') AND isError = 0 ORDER BY orderIndex ASC, createdAt ASC LIMIT :limit")
+    suspend fun getUnsummarizedMessagesInRangeOnce(
+        conversationId: String,
+        afterOrder: Int,
+        beforeOrder: Int,
+        limit: Int
+    ): List<MessageEntity>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND orderIndex > :afterOrder AND role IN ('USER', 'ASSISTANT') AND isError = 0")
+    suspend fun countConversationalMessagesAfter(conversationId: String, afterOrder: Int): Int
 
     @Query("SELECT * FROM messages WHERE content LIKE '%' || :query || '%' ORDER BY createdAt DESC LIMIT 50")
     suspend fun searchMessagesGlobal(query: String): List<MessageEntity>
@@ -351,4 +389,20 @@ interface SyncDao {
 
     @Query("UPDATE sync_conflicts SET resolutionStatus = :status WHERE id = :id")
     suspend fun updateConflictStatus(id: String, status: String)
+
+    @Query(
+        """
+        SELECT (
+            EXISTS(SELECT 1 FROM sync_tombstones WHERE syncedToRemote = 0) OR
+            EXISTS(SELECT 1 FROM sync_records WHERE isDirty = 1) OR
+            EXISTS(SELECT 1 FROM collections c LEFT JOIN sync_records r ON r.recordKey = 'COLLECTION:' || c.id WHERE r.recordKey IS NULL OR c.updatedAt > r.localUpdatedAt) OR
+            EXISTS(SELECT 1 FROM notebooks n LEFT JOIN sync_records r ON r.recordKey = 'NOTEBOOK:' || n.id WHERE r.recordKey IS NULL OR n.updatedAt > r.localUpdatedAt) OR
+            EXISTS(SELECT 1 FROM sources s LEFT JOIN sync_records r ON r.recordKey = 'SOURCE:' || s.id WHERE r.recordKey IS NULL OR s.updatedAt > r.localUpdatedAt) OR
+            EXISTS(SELECT 1 FROM conversations c LEFT JOIN sync_records r ON r.recordKey = 'CONVERSATION:' || c.id WHERE r.recordKey IS NULL OR c.updatedAt > r.localUpdatedAt) OR
+            EXISTS(SELECT 1 FROM messages m LEFT JOIN sync_records r ON r.recordKey = 'MESSAGE:' || m.id WHERE r.recordKey IS NULL OR m.createdAt > r.localUpdatedAt) OR
+            EXISTS(SELECT 1 FROM studio_artifacts a LEFT JOIN sync_records r ON r.recordKey = 'ARTIFACT:' || a.id WHERE r.recordKey IS NULL OR a.updatedAt > r.localUpdatedAt)
+        )
+        """
+    )
+    suspend fun hasPendingLocalChanges(): Boolean
 }

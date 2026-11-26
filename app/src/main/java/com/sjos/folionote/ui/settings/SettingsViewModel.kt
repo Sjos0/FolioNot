@@ -312,6 +312,17 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         updateManager.checkForUpdates()
     }
 
+    fun setAutoCheckUpdatesEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsStore.setAutoCheckUpdatesEnabled(enabled)
+            statusMessage.value = if (enabled) {
+                "Verificação automática de atualizações ativada."
+            } else {
+                "Verificação automática de atualizações desativada (apenas manual)."
+            }
+        }
+    }
+
     fun startOrResumeUpdateDownload(update: AvailableReleaseUpdate) {
         updateManager.startOrResumeDownload(update)
     }

@@ -252,7 +252,7 @@ class DriveSyncEngine(
                 } else if (err is DriveHttpException && err.code == 401) {
                     preferencesStore.markDriveNeedsReauth("Sessão do Google Drive expirada. Reconecte sua conta.")
                 } else if (scheduleRetryOnNetworkError && !isAuthFailure && err is IOException) {
-                    DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_BACKUP)
+                    DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_BACKUP, manualRetry = true)
                 }
                 val msg = if (isCancelled) "Backup cancelado." else (err.message ?: "Falha ao enviar backup.")
                 preferencesStore.updateDriveSyncTelemetry(status = "Falha no backup", error = msg)
@@ -910,7 +910,7 @@ class DriveSyncEngine(
                     if (err is DriveHttpException && err.code == 401) {
                         preferencesStore.markDriveNeedsReauth("Autorização do Google Drive expirada ou revogada. Reconecte sua conta.")
                     } else if (scheduleRetryOnNetworkError && !isAuthFailure && err is IOException) {
-                        DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_SYNC)
+                        DriveSyncWorker.enqueueOneTime(context, DriveSyncWorker.MODE_SYNC, manualRetry = true)
                     }
                     val msg = err.message ?: "Falha na sincronização com o Google Drive."
                     preferencesStore.updateDriveSyncTelemetry(
@@ -1178,6 +1178,8 @@ class DriveSyncEngine(
         )
     }
 
+    suspend fun hasPendingLocalChanges(): Boolean = database.syncDao().hasPendingLocalChanges()
+
     private fun parseMapById(arr: JSONArray?): Map<String, JSONObject> {
         if (arr == null) return emptyMap()
         val map = linkedMapOf<String, JSONObject>()
@@ -1401,19 +1403,25 @@ class DriveSyncWorker(
 
     companion object {
         const val KEY_MODE = "drive_worker_mode"
+        const val KEY_MANUAL_RETRY = "drive_manual_retry"
         const val MODE_SYNC = "SYNC"
         const val MODE_BACKUP = "BACKUP"
         private const val UNIQUE_ONETIME = "folionote_drive_retry"
         private const val UNIQUE_PERIODIC = "folionote_drive_periodic_sync"
 
-        fun enqueueOneTime(context: Context, mode: String = MODE_SYNC) {
+        fun enqueueOneTime(context: Context, mode: String = MODE_SYNC, manualRetry: Boolean = false) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
             val req = OneTimeWorkRequestBuilder<DriveSyncWorker>()
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                .setInputData(Data.Builder().putString(KEY_MODE, mode).build())
+                .setInputData(
+                    Data.Builder()
+                        .putString(KEY_MODE, mode)
+                        .putBoolean(KEY_MANUAL_RETRY, manualRetry)
+                        .build()
+                )
                 .addTag("drive_sync")
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
@@ -1449,6 +1457,20 @@ class DriveSyncWorker(
             else -> null
         }
 
+        internal suspend fun shouldSkipSyncWork(
+            settings: com.sjos.folionote.core.preferences.AppSettings,
+            mode: String,
+            isManualRetry: Boolean,
+            hasPendingLocalChanges: suspend () -> Boolean
+        ): Boolean {
+            if (!settings.isGoogleDriveConnected || settings.driveNeedsReauth) return true
+            if (!isManualRetry && mode == MODE_SYNC) {
+                if (!settings.driveSyncEnabled) return true
+                if (!hasPendingLocalChanges()) return true
+            }
+            return false
+        }
+
         internal suspend fun executeDriveWork(
             syncEngine: DriveSyncEngine,
             mode: String
@@ -1478,6 +1500,18 @@ class DriveSyncWorker(
         evaluatePrecondition(settings)?.let { return it }
 
         val mode = inputData.getString(KEY_MODE) ?: MODE_SYNC
+        val isManualRetry = inputData.getBoolean(KEY_MANUAL_RETRY, false)
+        if (
+            shouldSkipSyncWork(
+                settings = settings,
+                mode = mode,
+                isManualRetry = isManualRetry,
+                hasPendingLocalChanges = { app.container.driveSyncEngine.hasPendingLocalChanges() }
+            )
+        ) {
+            return Result.success()
+        }
+
         val outcome = executeDriveWork(
             syncEngine = app.container.driveSyncEngine,
             mode = mode

@@ -114,6 +114,257 @@ class HybridRetriever {
         }.sortedByDescending { it.lexicalScore }.take(limit)
     }
 
+    suspend fun retrieveOnDemand(
+        query: String,
+        sources: List<SourceEntity>,
+        queryEmbedding: FloatArray?,
+        topK: Int = 6,
+        pageSize: Int = 64,
+        loadChunkPage: suspend (limit: Int, offset: Int) -> List<DocumentChunkEntity>,
+        loadEmbeddingPage: suspend (limit: Int, offset: Int) -> List<EmbeddingEntity>,
+        loadChunksByIds: suspend (ids: List<String>) -> List<DocumentChunkEntity>
+    ): List<RetrievedPassage> {
+        val allowedSourceIds = sources.filter { it.isSelectedForChat }.map { it.id }.toSet()
+        if (allowedSourceIds.isEmpty()) return emptyList()
+        val sourceNames = sources.associate { it.id to it.name }
+        val safePageSize = pageSize.coerceAtLeast(1)
+        val safeTopK = topK.coerceAtLeast(1)
+        val candidateCap = (safeTopK * 8).coerceAtLeast(32)
+
+        val lexicalRanked = scoreLexicalBm25OnDemand(
+            query = query,
+            allowedSourceIds = allowedSourceIds,
+            pageSize = safePageSize,
+            candidateCap = candidateCap,
+            loadChunkPage = loadChunkPage
+        )
+        val semanticRanked = if (queryEmbedding != null) {
+            scoreSemanticCosineOnDemand(
+                queryVector = queryEmbedding,
+                allowedSourceIds = allowedSourceIds,
+                pageSize = safePageSize,
+                candidateCap = candidateCap,
+                loadEmbeddingPage = loadEmbeddingPage
+            )
+        } else {
+            emptyMap()
+        }
+
+        if (lexicalRanked.isEmpty() && semanticRanked.isEmpty()) return emptyList()
+
+        val lexicalRankOrder = lexicalRanked.entries
+            .filter { it.value > 0f }
+            .sortedByDescending { it.value }
+            .mapIndexed { idx, entry -> entry.key to (idx + 1) }
+            .toMap()
+
+        val semanticRankOrder = semanticRanked.entries
+            .filter { it.value > 0.1f }
+            .sortedByDescending { it.value }
+            .mapIndexed { idx, entry -> entry.key to (idx + 1) }
+            .toMap()
+
+        val candidateIds = (lexicalRankOrder.keys + semanticRankOrder.keys).distinct()
+        if (candidateIds.isEmpty()) return emptyList()
+
+        val rrfK = 60f
+        val scoredIds = candidateIds.map { id ->
+            val lexRank = lexicalRankOrder[id]
+            val semRank = semanticRankOrder[id]
+            val rrf = (lexRank?.let { 1f / (rrfK + it) } ?: 0f) +
+                (semRank?.let { 1.15f / (rrfK + it) } ?: 0f)
+            id to rrf
+        }.sortedByDescending { it.second }.take(candidateCap)
+
+        val loadedById = scoredIds.map { it.first }
+            .chunked(900)
+            .flatMap { batch -> loadChunksByIds(batch) }
+            .associateBy { it.id }
+
+        val passages = scoredIds.mapNotNull { (chunkId, rrf) ->
+            val chunk = loadedById[chunkId] ?: return@mapNotNull null
+            RetrievedPassage(
+                chunk = chunk,
+                sourceName = sourceNames[chunk.sourceId] ?: "Fonte",
+                lexicalScore = lexicalRanked[chunkId] ?: 0f,
+                semanticScore = semanticRanked[chunkId] ?: 0f,
+                fusedScore = rrf
+            )
+        }
+
+        return deduplicatePassages(passages).take(safeTopK)
+    }
+
+    suspend fun searchLexicalOnDemand(
+        query: String,
+        sources: List<SourceEntity>,
+        limit: Int = 30,
+        pageSize: Int = 64,
+        loadChunkPage: suspend (limit: Int, offset: Int) -> List<DocumentChunkEntity>,
+        loadChunksByIds: suspend (ids: List<String>) -> List<DocumentChunkEntity>
+    ): List<RetrievedPassage> {
+        if (query.isBlank() || sources.isEmpty()) return emptyList()
+        val safeLimit = limit.coerceAtLeast(1)
+        val sourceNames = sources.associate { it.id to it.name }
+        val allowedIds = sources.map { it.id }.toSet()
+        val topScores = scoreLexicalBm25OnDemand(
+            query = query,
+            allowedSourceIds = allowedIds,
+            pageSize = pageSize.coerceAtLeast(1),
+            candidateCap = safeLimit * 2,
+            loadChunkPage = loadChunkPage
+        )
+        if (topScores.isEmpty()) return emptyList()
+
+        val sortedIds = topScores.entries.sortedByDescending { it.value }.take(safeLimit)
+        val chunksById = sortedIds.map { it.key }
+            .chunked(900)
+            .flatMap { loadChunksByIds(it) }
+            .associateBy { it.id }
+
+        return sortedIds.mapNotNull { (chunkId, score) ->
+            val chunk = chunksById[chunkId] ?: return@mapNotNull null
+            RetrievedPassage(
+                chunk = chunk,
+                sourceName = sourceNames[chunk.sourceId] ?: "Fonte",
+                lexicalScore = score,
+                semanticScore = 0f,
+                fusedScore = score
+            )
+        }
+    }
+
+    private data class CompactLexicalMatch(
+        val chunkId: String,
+        val docLength: Int,
+        val queryTermFreqs: IntArray,
+        val hasExactPhrase: Boolean
+    )
+
+    private suspend fun scoreLexicalBm25OnDemand(
+        query: String,
+        allowedSourceIds: Set<String>,
+        pageSize: Int,
+        candidateCap: Int,
+        loadChunkPage: suspend (limit: Int, offset: Int) -> List<DocumentChunkEntity>
+    ): Map<String, Float> {
+        val queryTokens = tokenize(query)
+        if (queryTokens.isEmpty()) return emptyMap()
+        val uniqueQueryTerms = queryTokens.distinct()
+        val queryTermIndex = uniqueQueryTerms.withIndex().associate { (idx, term) -> term to idx }
+        val normalizedQuery = normalizeText(query)
+
+        val docFreq = IntArray(uniqueQueryTerms.size)
+        val matchingDocs = mutableListOf<CompactLexicalMatch>()
+        var totalDocs = 0L
+        var totalTokens = 0L
+        var offset = 0
+
+        while (true) {
+            val page = loadChunkPage(pageSize, offset)
+            if (page.isEmpty()) break
+            for (chunk in page) {
+                if (chunk.sourceId !in allowedSourceIds) continue
+                val tokens = tokenize("${chunk.sectionTitle} ${chunk.content}")
+                totalDocs++
+                totalTokens += tokens.size
+                if (tokens.isEmpty()) continue
+
+                val tfArray = IntArray(uniqueQueryTerms.size)
+                var hasAnyMatch = false
+                for (token in tokens) {
+                    val qIdx = queryTermIndex[token] ?: continue
+                    tfArray[qIdx]++
+                    hasAnyMatch = true
+                }
+                if (hasAnyMatch) {
+                    for (i in tfArray.indices) {
+                        if (tfArray[i] > 0) docFreq[i]++
+                    }
+                    val hasPhrase = normalizedQuery.length >= 4 &&
+                        normalizeText(chunk.content).contains(normalizedQuery)
+                    matchingDocs.add(
+                        CompactLexicalMatch(
+                            chunkId = chunk.id,
+                            docLength = tokens.size,
+                            queryTermFreqs = tfArray,
+                            hasExactPhrase = hasPhrase
+                        )
+                    )
+                }
+            }
+            if (page.size < pageSize) break
+            offset += page.size
+        }
+
+        if (totalDocs == 0L || matchingDocs.isEmpty()) return emptyMap()
+        val avgDocLen = (totalTokens.toDouble() / totalDocs.toDouble()).coerceAtLeast(1.0)
+        val totalDocsDouble = totalDocs.toDouble()
+        val k1 = 1.5
+        val b = 0.75
+
+        val scored = ArrayList<Pair<String, Float>>(matchingDocs.size)
+        for (doc in matchingDocs) {
+            var score = 0.0
+            val normLen = doc.docLength / avgDocLen
+            for (qTerm in queryTokens) {
+                val qIdx = queryTermIndex[qTerm] ?: continue
+                val tf = doc.queryTermFreqs[qIdx]
+                if (tf == 0) continue
+                val df = docFreq[qIdx]
+                val idf = ln(((totalDocsDouble - df + 0.5) / (df + 0.5)) + 1.0)
+                val tfNorm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * normLen))
+                score += idf * tfNorm
+            }
+            if (score > 0.0 && doc.hasExactPhrase) {
+                score *= 1.35
+            }
+            if (score > 0.0) {
+                scored.add(doc.chunkId to score.toFloat())
+            }
+        }
+        return scored.sortedByDescending { it.second }
+            .take(candidateCap)
+            .toMap()
+    }
+
+    private suspend fun scoreSemanticCosineOnDemand(
+        queryVector: FloatArray,
+        allowedSourceIds: Set<String>,
+        pageSize: Int,
+        candidateCap: Int,
+        loadEmbeddingPage: suspend (limit: Int, offset: Int) -> List<EmbeddingEntity>
+    ): Map<String, Float> {
+        val topHeap = java.util.PriorityQueue<Pair<String, Float>>(compareBy { it.second })
+        var offset = 0
+        while (true) {
+            val page = loadEmbeddingPage(pageSize, offset)
+            if (page.isEmpty()) break
+            for (emb in page) {
+                if (emb.sourceId !in allowedSourceIds) continue
+                val vec = VectorCodec.bytesToFloatArray(emb.vectorBlob)
+                if (vec.size == queryVector.size && vec.isNotEmpty()) {
+                    val cos = cosineSimilarity(queryVector, vec)
+                    if (cos > 0f) {
+                        if (topHeap.size < candidateCap) {
+                            topHeap.offer(emb.chunkId to cos)
+                        } else if (cos > (topHeap.peek()?.second ?: 0f)) {
+                            topHeap.poll()
+                            topHeap.offer(emb.chunkId to cos)
+                        }
+                    }
+                }
+            }
+            if (page.size < pageSize) break
+            offset += page.size
+        }
+        val result = HashMap<String, Float>(topHeap.size)
+        for ((id, score) in topHeap) {
+            result[id] = score
+        }
+        return result
+    }
+
     private fun scoreLexicalBm25(query: String, chunks: List<DocumentChunkEntity>): Map<String, Float> {
         val queryTokens = tokenize(query)
         if (queryTokens.isEmpty()) return emptyMap()

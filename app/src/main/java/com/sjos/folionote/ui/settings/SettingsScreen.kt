@@ -212,6 +212,24 @@ fun SettingsScreen(
                                         )
                                     }
                                 }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Verificar automaticamente ao abrir", style = MaterialTheme.typography.bodyLarge)
+                                        Text(
+                                            text = "Quando ativado, consulta o GitHub no máximo 1x a cada 24 horas ao abrir o app.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = settings.autoCheckUpdatesEnabled,
+                                        onCheckedChange = viewModel::setAutoCheckUpdatesEnabled,
+                                        modifier = Modifier.testTag("auto_update_check_switch")
+                                    )
+                                }
                                 Button(
                                     onClick = viewModel::checkForUpdates,
                                     shape = CircleShape,
