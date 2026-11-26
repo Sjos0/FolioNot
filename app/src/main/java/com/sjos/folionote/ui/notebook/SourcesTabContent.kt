@@ -20,27 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AudioFile
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.NoteAdd
-import androidx.compose.material.icons.outlined.PictureAsPdf
-import androidx.compose.material.icons.outlined.Slideshow
-import androidx.compose.material.icons.outlined.StickyNote2
-import androidx.compose.material.icons.outlined.VideoFile
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Link
-import androidx.compose.material.icons.rounded.MenuBook
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -80,6 +59,7 @@ import com.sjos.folionote.ui.theme.AccentEmerald
 import com.sjos.folionote.ui.theme.AccentPink
 import com.sjos.folionote.ui.theme.AccentPurple
 import com.sjos.folionote.ui.theme.AccentTeal
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -121,7 +101,7 @@ fun SourcesTabContent(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Rounded.WarningAmber,
+                                FolioIcons.Rounded.WarningAmber,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.size(18.dp)
@@ -143,7 +123,7 @@ fun SourcesTabContent(
                             shape = CircleShape,
                             modifier = Modifier.testTag("migrate_embeddings_button")
                         ) {
-                            Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
+                            Icon(FolioIcons.Rounded.Refresh, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Migrar e reindexar fontes")
                         }
@@ -164,7 +144,7 @@ fun SourcesTabContent(
                         verticalAlignment = Alignment.Top
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.StickyNote2,
+                            imageVector = FolioIcons.Outlined.StickyNote2,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.padding(top = 2.dp)
@@ -184,7 +164,7 @@ fun SourcesTabContent(
                             )
                         }
                         IconButton(onClick = onDismissBanner, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Fechar aviso", modifier = Modifier.size(18.dp))
+                            Icon(FolioIcons.Rounded.Close, contentDescription = "Fechar aviso", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -204,7 +184,7 @@ fun SourcesTabContent(
                         .minimumInteractiveComponentSize()
                         .testTag("add_sources_button")
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Arquivos", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -216,7 +196,7 @@ fun SourcesTabContent(
                         .minimumInteractiveComponentSize()
                         .testTag("create_note_source_button")
                 ) {
-                    Icon(Icons.Outlined.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Outlined.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Criar nota", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -229,7 +209,7 @@ fun SourcesTabContent(
                         .minimumInteractiveComponentSize()
                         .testTag("add_web_url_button")
                 ) {
-                    Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Rounded.Link, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Adicionar URL", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -241,7 +221,7 @@ fun SourcesTabContent(
                         .minimumInteractiveComponentSize()
                         .testTag("add_google_drive_source_button")
                 ) {
-                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Google Drive", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -260,11 +240,11 @@ fun SourcesTabContent(
                     value = state.sourceSearchQuery,
                     onValueChange = onSearchChange,
                     placeholder = { Text("Filtrar fontes no notebook...") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.Search, contentDescription = null) },
                     trailingIcon = {
                         if (state.sourceSearchQuery.isNotBlank()) {
                             IconButton(onClick = { onSearchChange("") }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Limpar")
+                                Icon(FolioIcons.Rounded.Close, contentDescription = "Limpar")
                             }
                         }
                     },
@@ -312,7 +292,7 @@ fun SourcesTabContent(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Description,
+                            imageVector = FolioIcons.Outlined.Description,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(40.dp)
@@ -386,17 +366,17 @@ private fun SourceRowItem(
     }
 
     val (icon, tint) = when (type) {
-        SourceType.PDF -> Icons.Outlined.PictureAsPdf to AccentCoral
-        SourceType.DOCX -> Icons.Outlined.Description to AccentBlue
-        SourceType.PPTX -> Icons.Outlined.Slideshow to AccentAmber
-        SourceType.EPUB -> Icons.Outlined.MenuBook to AccentPurple
-        SourceType.IMAGE -> Icons.Outlined.Image to AccentPink
-        SourceType.AUDIO -> Icons.Outlined.AudioFile to AccentTeal
-        SourceType.VIDEO -> Icons.Outlined.VideoFile to AccentCyan
-        SourceType.WEB_PAGE -> Icons.Outlined.Language to AccentBlue
-        SourceType.MARKDOWN -> Icons.Outlined.Description to AccentTeal
-        SourceType.NOTE -> Icons.Outlined.StickyNote2 to AccentAmber
-        SourceType.TXT -> Icons.Outlined.Description to AccentEmerald
+        SourceType.PDF -> FolioIcons.Outlined.PictureAsPdf to AccentCoral
+        SourceType.DOCX -> FolioIcons.Outlined.Description to AccentBlue
+        SourceType.PPTX -> FolioIcons.Outlined.Slideshow to AccentAmber
+        SourceType.EPUB -> FolioIcons.Outlined.MenuBook to AccentPurple
+        SourceType.IMAGE -> FolioIcons.Outlined.Image to AccentPink
+        SourceType.AUDIO -> FolioIcons.Outlined.AudioFile to AccentTeal
+        SourceType.VIDEO -> FolioIcons.Outlined.VideoFile to AccentCyan
+        SourceType.WEB_PAGE -> FolioIcons.Outlined.Language to AccentBlue
+        SourceType.MARKDOWN -> FolioIcons.Outlined.Description to AccentTeal
+        SourceType.NOTE -> FolioIcons.Outlined.StickyNote2 to AccentAmber
+        SourceType.TXT -> FolioIcons.Outlined.Description to AccentEmerald
     }
 
     Surface(
@@ -446,7 +426,7 @@ private fun SourceRowItem(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isWarning) {
                             Icon(
-                                Icons.Rounded.WarningAmber,
+                                FolioIcons.Rounded.WarningAmber,
                                 contentDescription = null,
                                 tint = if (status == SourceStatus.PARTIAL) AccentAmber else MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(14.dp)
@@ -469,12 +449,12 @@ private fun SourceRowItem(
 
                 Box {
                     IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "Opções da fonte")
+                        Icon(FolioIcons.Rounded.MoreVert, contentDescription = "Opções da fonte")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("Ler offline") },
-                            leadingIcon = { Icon(Icons.Rounded.MenuBook, null) },
+                            leadingIcon = { Icon(FolioIcons.Rounded.MenuBook, null) },
                             onClick = {
                                 menuOpen = false
                                 onClick()
@@ -482,7 +462,7 @@ private fun SourceRowItem(
                         )
                         DropdownMenuItem(
                             text = { Text("Reprocessar") },
-                            leadingIcon = { Icon(Icons.Rounded.Refresh, null) },
+                            leadingIcon = { Icon(FolioIcons.Rounded.Refresh, null) },
                             onClick = {
                                 menuOpen = false
                                 onReprocess()
@@ -490,7 +470,7 @@ private fun SourceRowItem(
                         )
                         DropdownMenuItem(
                             text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                             onClick = {
                                 menuOpen = false
                                 onDelete()

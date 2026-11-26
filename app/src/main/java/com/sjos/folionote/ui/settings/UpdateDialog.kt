@@ -14,14 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SystemUpdate
-import androidx.compose.material.icons.outlined.VerifiedUser
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.PauseCircle
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +37,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.sjos.folionote.engine.updater.AvailableReleaseUpdate
 import com.sjos.folionote.engine.updater.UpdateUiState
 import com.sjos.folionote.ui.components.FormatUtils
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @Composable
 fun AppUpdateDialog(
@@ -85,17 +78,17 @@ fun AppUpdateDialog(
         icon = {
             val (icon, tint) = when (updateState) {
                 is UpdateUiState.UpToDate, is UpdateUiState.Installed ->
-                    Icons.Rounded.CheckCircle to MaterialTheme.colorScheme.primary
+                    FolioIcons.Rounded.CheckCircle to MaterialTheme.colorScheme.primary
                 is UpdateUiState.Failed ->
-                    Icons.Rounded.ErrorOutline to MaterialTheme.colorScheme.error
+                    FolioIcons.Rounded.ErrorOutline to MaterialTheme.colorScheme.error
                 is UpdateUiState.Paused ->
-                    Icons.Rounded.PauseCircle to MaterialTheme.colorScheme.tertiary
+                    FolioIcons.Rounded.PauseCircle to MaterialTheme.colorScheme.tertiary
                 is UpdateUiState.ReadyToInstall ->
-                    Icons.Outlined.VerifiedUser to MaterialTheme.colorScheme.primary
+                    FolioIcons.Outlined.VerifiedUser to MaterialTheme.colorScheme.primary
                 is UpdateUiState.AwaitingInstallPermission ->
-                    Icons.Outlined.Settings to MaterialTheme.colorScheme.secondary
+                    FolioIcons.Outlined.Settings to MaterialTheme.colorScheme.secondary
                 else ->
-                    Icons.Outlined.SystemUpdate to MaterialTheme.colorScheme.primary
+                    FolioIcons.Outlined.SystemUpdate to MaterialTheme.colorScheme.primary
             }
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(28.dp))
         },
@@ -327,7 +320,7 @@ fun AppUpdateDialog(
                         shape = CircleShape,
                         modifier = Modifier.testTag("update_retry_button")
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(FolioIcons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Tentar novamente")
                     }

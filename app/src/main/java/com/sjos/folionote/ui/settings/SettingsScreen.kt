@@ -30,19 +30,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.DocumentScanner
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.SystemUpdate
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,6 +74,7 @@ import com.sjos.folionote.core.preferences.OcrProviderType
 import com.sjos.folionote.core.preferences.TranscriptionProviderType
 import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
 import com.sjos.folionote.ui.components.FormatUtils
+import com.sjos.folionote.ui.theme.FolioIcons
 import com.sjos.folionote.ui.theme.ThemePreference
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -183,7 +171,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("settings_back_button")) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
+                        Icon(FolioIcons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
                     }
                     Text("Configurações", style = MaterialTheme.typography.titleLarge)
                 }
@@ -207,7 +195,7 @@ fun SettingsScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        Icons.Outlined.SystemUpdate,
+                                        FolioIcons.Outlined.SystemUpdate,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary
                                     )
@@ -229,7 +217,7 @@ fun SettingsScreen(
                                     shape = CircleShape,
                                     modifier = Modifier.testTag("check_updates_button")
                                 ) {
-                                    Icon(Icons.Outlined.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(FolioIcons.Outlined.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
                                     Text("Verificar atualizações")
                                 }
@@ -251,7 +239,7 @@ fun SettingsScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        Icons.Outlined.Key,
+                                        FolioIcons.Outlined.Key,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary
                                     )
@@ -304,7 +292,7 @@ fun SettingsScreen(
                                     trailingIcon = {
                                         IconButton(onClick = { geminiKeyVisible = !geminiKeyVisible }) {
                                             Icon(
-                                                imageVector = if (geminiKeyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                                imageVector = if (geminiKeyVisible) FolioIcons.Outlined.VisibilityOff else FolioIcons.Outlined.Visibility,
                                                 contentDescription = if (geminiKeyVisible) "Ocultar chave" else "Mostrar chave"
                                             )
                                         }
@@ -358,7 +346,7 @@ fun SettingsScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Icon(
-                                                imageVector = if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                                                imageVector = if (ok) FolioIcons.Rounded.CheckCircle else FolioIcons.Rounded.ErrorOutline,
                                                 contentDescription = null,
                                                 tint = if (ok) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                                                 modifier = Modifier.size(18.dp)
@@ -463,7 +451,7 @@ fun SettingsScreen(
                                             onClick = viewModel::refreshGoogleProfile,
                                             enabled = !state.isConnectingGoogle
                                         ) {
-                                            Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar perfil")
+                                            Icon(FolioIcons.Rounded.Refresh, contentDescription = "Atualizar perfil")
                                         }
                                     }
 
@@ -599,7 +587,7 @@ fun SettingsScreen(
                                             shape = CircleShape,
                                             modifier = Modifier.testTag("settings_drive_sync_now")
                                         ) {
-                                            Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.Rounded.Sync, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Sincronizar agora")
                                         }
@@ -608,7 +596,7 @@ fun SettingsScreen(
                                             shape = CircleShape,
                                             modifier = Modifier.testTag("settings_open_drive_manager")
                                         ) {
-                                            Icon(Icons.Outlined.CloudSync, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.Outlined.CloudSync, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Gerenciar backups e sync")
                                         }
@@ -688,7 +676,7 @@ fun SettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Outlined.DocumentScanner, null, tint = MaterialTheme.colorScheme.secondary)
+                                    Icon(FolioIcons.Outlined.DocumentScanner, null, tint = MaterialTheme.colorScheme.secondary)
                                     Spacer(Modifier.width(8.dp))
                                     Text("Motor de OCR (PDF digitalizado e Imagens)", style = MaterialTheme.typography.titleSmall)
                                 }
@@ -754,7 +742,7 @@ fun SettingsScreen(
                                         visualTransformation = if (ocrKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                         trailingIcon = {
                                             IconButton(onClick = { ocrKeyVisible = !ocrKeyVisible }) {
-                                                Icon(if (ocrKeyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave OCR")
+                                                Icon(if (ocrKeyVisible) FolioIcons.Outlined.VisibilityOff else FolioIcons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave OCR")
                                             }
                                         },
                                         singleLine = true,
@@ -791,7 +779,7 @@ fun SettingsScreen(
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.secondary)
+                                    Icon(FolioIcons.Outlined.GraphicEq, null, tint = MaterialTheme.colorScheme.secondary)
                                     Spacer(Modifier.width(8.dp))
                                     Text("Transcrição de Áudio e Vídeo", style = MaterialTheme.typography.titleSmall)
                                 }
@@ -859,7 +847,7 @@ fun SettingsScreen(
                                                 shape = CircleShape,
                                                 modifier = Modifier.testTag("groq_get_key_button")
                                             ) {
-                                                Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Icon(FolioIcons.Outlined.Key, contentDescription = null, modifier = Modifier.size(16.dp))
                                                 Spacer(Modifier.width(6.dp))
                                                 Text("Obter chave na Groq")
                                             }
@@ -905,7 +893,7 @@ fun SettingsScreen(
                                     visualTransformation = if (transKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                     trailingIcon = {
                                         IconButton(onClick = { transKeyVisible = !transKeyVisible }) {
-                                            Icon(if (transKeyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave transcrição")
+                                            Icon(if (transKeyVisible) FolioIcons.Outlined.VisibilityOff else FolioIcons.Outlined.Visibility, contentDescription = "Mostrar/ocultar chave transcrição")
                                         }
                                     },
                                     singleLine = true,

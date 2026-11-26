@@ -1,12 +1,17 @@
 package com.sjos.folionote.engine.ai
 
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.security.KeystoreCryptoManager
 import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ProviderEntity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,7 +22,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.util.concurrent.TimeUnit
 
 interface AiProviderClient {
     suspend fun testConnection(provider: ProviderEntity): ConnectionTestResult
@@ -31,19 +35,19 @@ interface AiProviderClient {
 
 class OpenAiCompatibleClient(
     private val cryptoManager: KeystoreCryptoManager,
-    baseHttpClient: OkHttpClient = OkHttpClient()
+    baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient
 ) : AiProviderClient {
 
     private val sharedClient: OkHttpClient = baseHttpClient
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    private fun clientForProvider(provider: ProviderEntity): OkHttpClient {
-        val timeout = provider.timeoutSeconds.coerceIn(5, 300).toLong()
-        return sharedClient.newBuilder()
-            .connectTimeout(timeout.coerceAtMost(30), TimeUnit.SECONDS)
-            .readTimeout(timeout, TimeUnit.SECONDS)
-            .writeTimeout(timeout, TimeUnit.SECONDS)
-            .build()
+    private fun timeoutSpecForProvider(provider: ProviderEntity): RequestTimeoutSpec {
+        val timeout = provider.timeoutSeconds.coerceIn(5, 300)
+        return RequestTimeoutSpec(
+            connectTimeoutSeconds = timeout.coerceAtMost(30),
+            readTimeoutSeconds = timeout,
+            writeTimeoutSeconds = timeout
+        )
     }
 
     internal fun resolveUrl(baseUrl: String, endpointPath: String): String {
@@ -60,7 +64,9 @@ class OpenAiCompatibleClient(
         url: String,
         provider: ProviderEntity
     ): Request.Builder {
-        val builder = Request.Builder().url(url)
+        val builder = Request.Builder()
+            .url(url)
+            .tag(RequestTimeoutSpec::class.java, timeoutSpecForProvider(provider))
         val decryptedKey = cryptoManager.decrypt(provider.encryptedApiKey).trim()
         if (decryptedKey.isNotEmpty() && provider.authHeaderName.isNotBlank()) {
             val headerVal = if (provider.authPrefix.isNotBlank()) {
@@ -97,11 +103,10 @@ class OpenAiCompatibleClient(
             )
         }
 
-        val client = clientForProvider(provider)
         val request = buildRequestWithHeaders(url, provider).get().build()
 
         runCatching {
-            client.newCall(request).execute().use { response ->
+            sharedClient.newCall(request).execute().use { response ->
                 val latency = System.currentTimeMillis() - start
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
@@ -133,11 +138,10 @@ class OpenAiCompatibleClient(
 
     override suspend fun fetchModels(provider: ProviderEntity): Result<List<DiscoveredModel>> = withContext(Dispatchers.IO) {
         val url = resolveUrl(provider.baseUrl, provider.modelsPath)
-        val client = clientForProvider(provider)
         val request = buildRequestWithHeaders(url, provider).get().build()
 
         runCatching {
-            client.newCall(request).execute().use { response ->
+            sharedClient.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     val errDetail = extractApiErrorMessage(body)
@@ -216,50 +220,51 @@ class OpenAiCompatibleClient(
             .header("Accept", if (useStream) "text/event-stream" else "application/json")
             .build()
 
-        val client = clientForProvider(provider)
-        val call: Call = client.newCall(okRequest)
+        val call: Call = sharedClient.newCall(okRequest)
 
-        try {
-            val response = withContext(Dispatchers.IO) { call.execute() }
-            response.use { resp ->
-                if (!resp.isSuccessful) {
-                    val errBody = withContext(Dispatchers.IO) { resp.body?.string().orEmpty() }
-                    val detail = extractApiErrorMessage(errBody)
-                    trySend(ChatStreamEvent.Error(formatHttpError(resp.code, detail), resp.code))
-                    close()
-                    return@callbackFlow
-                }
-
-                val contentType = resp.header("Content-Type").orEmpty().lowercase()
-                val body = resp.body
-                if (body == null) {
-                    trySend(ChatStreamEvent.Error("Resposta vazia do provedor."))
-                    close()
-                    return@callbackFlow
-                }
-
-                if (useStream && (contentType.contains("event-stream") || contentType.contains("text/plain") || contentType.isEmpty())) {
-                    withContext(Dispatchers.IO) {
-                        parseSseStream(
-                            reader = BufferedReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)),
-                            onEvent = { event -> trySend(event) }
-                        )
+        val job = launch(Dispatchers.IO) {
+            try {
+                call.execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        val errBody = resp.body?.string().orEmpty()
+                        val detail = extractApiErrorMessage(errBody)
+                        trySend(ChatStreamEvent.Error(formatHttpError(resp.code, detail), resp.code))
+                        return@use
                     }
-                } else {
-                    val rawJson = withContext(Dispatchers.IO) { body.string() }
-                    parseNonStreamingCompletion(rawJson).forEach { trySend(it) }
+
+                    val contentType = resp.header("Content-Type").orEmpty().lowercase()
+                    val body = resp.body
+                    if (body == null) {
+                        trySend(ChatStreamEvent.Error("Resposta vazia do provedor."))
+                        return@use
+                    }
+
+                    if (useStream && (contentType.contains("event-stream") || contentType.contains("text/plain") || contentType.isEmpty())) {
+                        BufferedReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)).use { reader ->
+                            parseSseStream(
+                                reader = reader,
+                                onEvent = { event -> trySend(event) }
+                            )
+                        }
+                    } else {
+                        val rawJson = body.string()
+                        parseNonStreamingCompletion(rawJson).forEach { trySend(it) }
+                    }
                 }
+            } catch (t: Throwable) {
+                if (!call.isCanceled()) {
+                    trySend(ChatStreamEvent.Error("Erro na requisição: ${t.localizedMessage ?: t::class.java.simpleName}"))
+                }
+            } finally {
+                close()
             }
-        } catch (t: Throwable) {
-            if (!call.isCanceled()) {
-                trySend(ChatStreamEvent.Error("Erro na requisição: ${t.localizedMessage ?: t::class.java.simpleName}"))
-            }
-        } finally {
-            close()
         }
 
         awaitClose {
-            call.cancel()
+            job.cancel()
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                runCatching { call.cancel() }
+            }
         }
     }
 

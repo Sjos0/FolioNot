@@ -9,6 +9,7 @@ import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ResponseLengthPreset
 import com.sjos.folionote.data.local.ToolDefinitionEntity
 import com.sjos.folionote.engine.ai.ChatMessagePayload
+import com.sjos.folionote.engine.ai.ModelLimitsValidator
 import com.sjos.folionote.engine.ai.ToolSchemaPayload
 import com.sjos.folionote.engine.retrieval.RetrievedPassage
 import java.util.UUID
@@ -78,10 +79,17 @@ class ContextBudgetPlanner {
         retrievedPassages: List<RetrievedPassage>,
         enabledTools: List<ToolDefinitionEntity>
     ): ContextPlanResult {
-        val contextWindow = model.contextWindow.coerceAtLeast(512)
-        val reservedOutput = model.maxOutputTokens.coerceIn(64, contextWindow)
-        val safetyMargin = (contextWindow * 0.05).toInt().coerceIn(128, 1024)
-        val availableInputBudget = (contextWindow - reservedOutput - safetyMargin)
+        val contextWindow = model.contextWindow.coerceIn(
+            ModelLimitsValidator.MIN_CONTEXT_WINDOW,
+            ModelLimitsValidator.MAX_CONTEXT_WINDOW
+        )
+        val reservedOutput = model.maxOutputTokens.coerceIn(
+            ModelLimitsValidator.MIN_MAX_OUTPUT_TOKENS,
+            contextWindow
+        )
+        val safetyMargin = ((contextWindow.toLong() * 5L) / 100L).coerceIn(128L, 1024L).toInt()
+        val availableInputBudgetLong = contextWindow.toLong() - reservedOutput.toLong() - safetyMargin.toLong()
+        val availableInputBudget = availableInputBudgetLong.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 
         val toolPayloads = if (model.supportsTools) {
             enabledTools.filter { it.enabled }.map {
@@ -104,9 +112,10 @@ class ContextBudgetPlanner {
         }
 
         val queryTokens = TokenEstimator.estimateMessageTokens("user", userQuery)
-        val fixedMinimum = systemTokens + toolsTokens + queryTokens
+        val fixedMinimumLong = systemTokens.toLong() + toolsTokens.toLong() + queryTokens.toLong()
+        val fixedMinimum = fixedMinimumLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
-        if (availableInputBudget <= fixedMinimum) {
+        if (availableInputBudgetLong <= fixedMinimumLong) {
             val report = ContextBudgetReport(
                 contextWindow = contextWindow,
                 reservedOutputTokens = reservedOutput,
@@ -118,7 +127,7 @@ class ContextBudgetPlanner {
                 toolsTokens = toolsTokens,
                 currentQueryTokens = queryTokens,
                 totalUsedInputTokens = fixedMinimum,
-                availableInputBudget = availableInputBudget.coerceAtLeast(0),
+                availableInputBudget = availableInputBudget,
                 includedRagCount = 0,
                 droppedRagCount = retrievedPassages.size,
                 includedHistoryCount = 0,
@@ -131,10 +140,10 @@ class ContextBudgetPlanner {
             )
         }
 
-        var remaining = availableInputBudget - fixedMinimum
+        var remaining = (availableInputBudgetLong - fixedMinimumLong).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
-        // 1. Allocate RAG passages up to 58% of remaining input budget
-        val ragBudgetCap = (remaining * 0.58).toInt().coerceAtLeast(300)
+        // 1. Allocate RAG passages up to 58% of remaining input budget using Long arithmetic to avoid overflow
+        val ragBudgetCap = ((remaining.toLong() * 58L) / 100L).coerceIn(300L, Int.MAX_VALUE.toLong()).toInt()
         var ragTokensUsed = 0
         val selectedPassages = mutableListOf<RetrievedPassage>()
         val formattedPassages = mutableListOf<String>()

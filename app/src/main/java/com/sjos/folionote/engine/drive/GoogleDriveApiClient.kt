@@ -1,5 +1,7 @@
 package com.sjos.folionote.engine.drive
 
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,7 +19,6 @@ import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.TimeUnit
 
 data class DriveFileItem(
     val id: String,
@@ -48,7 +49,7 @@ class DriveHttpException(
  * listing, renaming, and deleting files. Base URLs are injectable for local HttpServer tests.
  */
 class GoogleDriveApiClient(
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val driveApiBaseUrl: String = "https://www.googleapis.com/drive/v3",
     private val driveUploadBaseUrl: String = "https://www.googleapis.com/upload/drive/v3"
 ) {
@@ -66,10 +67,6 @@ class GoogleDriveApiClient(
         pageSize: Int = 100
     ): Result<List<DriveFileItem>> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
-
             val urlBuilder = "${driveApiBaseUrl.trimEnd('/')}/files".toHttpUrl().newBuilder()
                 .addQueryParameter("spaces", "appDataFolder")
                 .addQueryParameter("pageSize", pageSize.coerceIn(1, 500).toString())
@@ -81,11 +78,12 @@ class GoogleDriveApiClient(
 
             val req = Request.Builder()
                 .url(urlBuilder.build())
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 30))
                 .header("Authorization", "Bearer $accessToken")
                 .get()
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     throw DriveHttpException(resp.code, "Google Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -112,10 +110,6 @@ class GoogleDriveApiClient(
         pageSize: Int = 50
     ): Result<List<DriveFileItem>> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
-
             val baseFilter = "trashed = false and mimeType != 'application/vnd.google-apps.folder'"
             val cleanQuery = nameQuery?.trim()?.replace("'", "\\'")
             val fullQuery = if (!cleanQuery.isNullOrBlank()) {
@@ -133,11 +127,12 @@ class GoogleDriveApiClient(
 
             val req = Request.Builder()
                 .url(urlBuilder.build())
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 30))
                 .header("Authorization", "Bearer $accessToken")
                 .get()
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     throw DriveHttpException(resp.code, "Google Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -189,19 +184,17 @@ class GoogleDriveApiClient(
 
         runCatching {
             destDir.mkdirs()
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(60, TimeUnit.SECONDS)
-                .build()
             val url = "${driveApiBaseUrl.trimEnd('/')}/files/${item.id}/export".toHttpUrl().newBuilder()
                 .addQueryParameter("mimeType", exportMime)
                 .build()
             val req = Request.Builder()
                 .url(url)
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 60))
                 .header("Authorization", "Bearer $accessToken")
                 .get()
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val raw = resp.body?.string().orEmpty()
                     throw DriveHttpException(resp.code, "Export Drive HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -255,10 +248,6 @@ class GoogleDriveApiClient(
         appProperties: Map<String, String> = emptyMap()
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
-
             val metadata = JSONObject().apply {
                 put("name", remoteFileName)
                 if (existingFileId.isNullOrBlank()) {
@@ -279,6 +268,7 @@ class GoogleDriveApiClient(
 
             val reqBuilder = Request.Builder()
                 .url(uploadUrl)
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 30))
                 .header("Authorization", "Bearer $accessToken")
                 .header("X-Upload-Content-Type", mimeType)
                 .header("X-Upload-Content-Length", totalBytes.toString())
@@ -290,7 +280,7 @@ class GoogleDriveApiClient(
                 reqBuilder.patch(body).build()
             }
 
-            client.newCall(request).execute().use { resp ->
+            baseHttpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val raw = resp.body?.string().orEmpty()
                     throw IllegalStateException("Falha ao iniciar upload resumable HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -307,18 +297,16 @@ class GoogleDriveApiClient(
         accessToken: String
     ): Result<Long> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(20, TimeUnit.SECONDS)
-                .build()
             val emptyBody = ByteArray(0).toRequestBody(null)
             val req = Request.Builder()
                 .url(sessionUri)
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 20))
                 .header("Authorization", "Bearer $accessToken")
                 .header("Content-Range", "bytes */$totalBytes")
                 .put(emptyBody)
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 when (resp.code) {
                     200, 201 -> totalBytes
                     308 -> parseRangeUpperBound(resp.header("Range"))?.plus(1L) ?: 0L
@@ -345,10 +333,7 @@ class GoogleDriveApiClient(
         runCatching {
             require(localFile.exists()) { "Arquivo local para upload não encontrado." }
             val totalBytes = localFile.length()
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .build()
+            val uploadTimeoutSpec = RequestTimeoutSpec(readTimeoutSeconds = 60, writeTimeoutSeconds = 60)
 
             var sessionUri = existingSessionUri
             var offset = 0L
@@ -378,11 +363,12 @@ class GoogleDriveApiClient(
             if (totalBytes == 0L) {
                 val req = Request.Builder()
                     .url(sessionUri)
+                    .tag(RequestTimeoutSpec::class.java, uploadTimeoutSpec)
                     .header("Authorization", "Bearer $accessToken")
                     .header("Content-Length", "0")
                     .put(ByteArray(0).toRequestBody(mimeType.toMediaType()))
                     .build()
-                client.newCall(req).execute().use { resp ->
+                baseHttpClient.newCall(req).execute().use { resp ->
                     val raw = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
                         throw IllegalStateException("Upload HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -417,12 +403,13 @@ class GoogleDriveApiClient(
 
                     val putReq = Request.Builder()
                         .url(sessionUri)
+                        .tag(RequestTimeoutSpec::class.java, uploadTimeoutSpec)
                         .header("Authorization", "Bearer $accessToken")
                         .header("Content-Range", "bytes $offset-$endInclusive/$totalBytes")
                         .put(chunkBody)
                         .build()
 
-                    client.newCall(putReq).execute().use { resp ->
+                    baseHttpClient.newCall(putReq).execute().use { resp ->
                         when (resp.code) {
                             200, 201 -> {
                                 val raw = resp.body?.string().orEmpty()
@@ -464,13 +451,10 @@ class GoogleDriveApiClient(
                 0L
             }
 
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(60, TimeUnit.SECONDS)
-                .build()
-
             val url = "${driveApiBaseUrl.trimEnd('/')}/files/$fileId?alt=media"
             val reqBuilder = Request.Builder()
                 .url(url)
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 60))
                 .header("Authorization", "Bearer $accessToken")
                 .get()
 
@@ -478,7 +462,7 @@ class GoogleDriveApiClient(
                 reqBuilder.header("Range", "bytes=$existingOffset-")
             }
 
-            client.newCall(reqBuilder.build()).execute().use { resp ->
+            baseHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
                 if (!resp.isSuccessful && resp.code != 206) {
                     val raw = resp.body?.string().orEmpty()
                     throw DriveHttpException(resp.code, "Download HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -531,18 +515,16 @@ class GoogleDriveApiClient(
         runCatching {
             val clean = newName.trim()
             require(clean.isNotBlank()) { "O novo nome não pode estar em branco." }
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
             val url = "${driveApiBaseUrl.trimEnd('/')}/files/$fileId?fields=id,name,size,modifiedTime,md5Checksum,appProperties"
             val body = JSONObject().put("name", clean).toString().toRequestBody(jsonMediaType)
             val req = Request.Builder()
                 .url(url)
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 30))
                 .header("Authorization", "Bearer $accessToken")
                 .patch(body)
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 val raw = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     throw IllegalStateException("Erro ao renomear backup HTTP ${resp.code}: ${extractGoogleError(raw)}")
@@ -554,16 +536,14 @@ class GoogleDriveApiClient(
 
     suspend fun deleteFile(accessToken: String, fileId: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(30, TimeUnit.SECONDS)
-                .build()
             val req = Request.Builder()
                 .url("${driveApiBaseUrl.trimEnd('/')}/files/$fileId")
+                .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 30))
                 .header("Authorization", "Bearer $accessToken")
                 .delete()
                 .build()
 
-            client.newCall(req).execute().use { resp ->
+            baseHttpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful && resp.code != 204 && resp.code != 404) {
                     val raw = resp.body?.string().orEmpty()
                     throw IllegalStateException("Erro ao excluir arquivo HTTP ${resp.code}: ${extractGoogleError(raw)}")

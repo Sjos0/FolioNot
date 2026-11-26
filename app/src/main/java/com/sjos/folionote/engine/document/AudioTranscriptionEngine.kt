@@ -6,6 +6,8 @@ import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.media.MediaMuxer
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.core.preferences.AppSettings
 import com.sjos.folionote.core.preferences.TranscriptionProviderType
@@ -34,7 +36,6 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -212,7 +213,7 @@ interface AudioTranscriptionEngine {
 class ExternalAudioTranscriptionEngine(
     private val preferencesStore: AppPreferencesStore,
     private val cryptoManager: KeystoreCryptoManager,
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val mediaMetadataReader: MediaMetadataReader = AndroidMediaMetadataReader(),
     private val mediaSegmenter: MediaSegmenter = AndroidMediaExtractorSegmenter(),
     private val allowLoopbackHttpForTests: Boolean = false
@@ -478,11 +479,6 @@ class ExternalAudioTranscriptionEngine(
         plainKey: String,
         settings: AppSettings
     ): TranscriptionResult {
-        val client = baseHttpClient.newBuilder()
-            .readTimeout(180, TimeUnit.SECONDS)
-            .writeTimeout(180, TimeUnit.SECONDS)
-            .build()
-
         val defaultModel = if (settings.transcriptionProviderType == TranscriptionProviderType.GROQ_WHISPER) {
             TranscriptionLimits.GROQ_DEFAULT_MODEL
         } else {
@@ -509,13 +505,17 @@ class ExternalAudioTranscriptionEngine(
 
         val reqBuilder = Request.Builder()
             .url(endpoint)
+            .tag(
+                RequestTimeoutSpec::class.java,
+                RequestTimeoutSpec(readTimeoutSeconds = 180, writeTimeoutSeconds = 180)
+            )
             .post(multipart)
 
         if (plainKey.isNotBlank()) {
             reqBuilder.addHeader("Authorization", "Bearer $plainKey")
         }
 
-        val response = awaitCancellableCall(client.newCall(reqBuilder.build()))
+        val response = awaitCancellableCall(baseHttpClient.newCall(reqBuilder.build()))
         response.use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {

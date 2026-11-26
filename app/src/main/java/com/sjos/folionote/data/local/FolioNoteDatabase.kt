@@ -28,7 +28,7 @@ import java.nio.ByteOrder
         SyncTombstoneEntity::class,
         SyncConflictEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class FolioNoteDatabase : RoomDatabase() {
@@ -96,6 +96,12 @@ abstract class FolioNoteDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `isPartial` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): FolioNoteDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -103,7 +109,7 @@ abstract class FolioNoteDatabase : RoomDatabase() {
                     FolioNoteDatabase::class.java,
                     "folionote_db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

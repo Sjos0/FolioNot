@@ -22,24 +22,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Sort
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.LightMode
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Smartphone
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.DriveFileMove
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -76,10 +58,10 @@ import com.sjos.folionote.data.local.NotebookEntity
 import com.sjos.folionote.ui.components.CollectionGeometricIcon
 import com.sjos.folionote.ui.components.FolioLogoMark
 import com.sjos.folionote.ui.components.FormatUtils
+import com.sjos.folionote.ui.theme.FolioIcons
 import com.sjos.folionote.ui.theme.NotebookIcons
 import com.sjos.folionote.ui.theme.ThemePreference
 
-import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
@@ -129,7 +111,7 @@ fun HomeScreen(
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.testTag("create_notebook_fab")
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Icon(FolioIcons.Rounded.Add, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Novo notebook")
                 }
@@ -374,7 +356,7 @@ private fun HomeTopBar(
                     )
                     Spacer(Modifier.width(4.dp))
                     Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        imageVector = FolioIcons.Rounded.KeyboardArrowDown,
                         contentDescription = "Alterar visualização",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -391,7 +373,7 @@ private fun HomeTopBar(
                         text = { Text(mode.label) },
                         trailingIcon = {
                             if (mode == filterMode) {
-                                Icon(Icons.Rounded.Check, contentDescription = null)
+                                Icon(FolioIcons.Rounded.Check, contentDescription = null)
                             }
                         },
                         onClick = { onSelectFilter(mode) }
@@ -406,14 +388,14 @@ private fun HomeTopBar(
             onClick = onOpenSearch,
             modifier = Modifier.testTag("home_search_button")
         ) {
-            Icon(Icons.Rounded.Search, contentDescription = "Pesquisar")
+            Icon(FolioIcons.Rounded.Search, contentDescription = "Pesquisar")
         }
 
         IconButton(
             onClick = onOpenProviders,
             modifier = Modifier.testTag("home_providers_button")
         ) {
-            Icon(Icons.Outlined.Apps, contentDescription = "Provedores e Modelos de IA")
+            Icon(FolioIcons.Outlined.Apps, contentDescription = "Provedores e Modelos de IA")
         }
 
         Box {
@@ -429,7 +411,7 @@ private fun HomeTopBar(
                         modifier = Modifier.size(28.dp)
                     )
                 } else {
-                    Icon(Icons.Outlined.Settings, contentDescription = "Configurações e Tema")
+                    Icon(FolioIcons.Outlined.Settings, contentDescription = "Configurações e Tema")
                 }
             }
 
@@ -439,7 +421,7 @@ private fun HomeTopBar(
             ) {
                 DropdownMenuItem(
                     text = { Text("Provedores e Modelos") },
-                    leadingIcon = { Icon(Icons.Rounded.SmartToy, contentDescription = null) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.SmartToy, contentDescription = null) },
                     onClick = {
                         onToggleQuickMenu()
                         onOpenProviders()
@@ -447,31 +429,31 @@ private fun HomeTopBar(
                 )
                 DropdownMenuItem(
                     text = { Text("Google Drive (Backups e Sync)") },
-                    leadingIcon = { Icon(Icons.Outlined.CloudSync, contentDescription = null) },
+                    leadingIcon = { Icon(FolioIcons.Outlined.CloudSync, contentDescription = null) },
                     onClick = onOpenDriveSync
                 )
                 DropdownMenuItem(
                     text = { Text("Configurações avançadas") },
-                    leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                    leadingIcon = { Icon(FolioIcons.Outlined.Settings, contentDescription = null) },
                     onClick = onOpenSettings
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 DropdownMenuItem(
                     text = { Text("Modo claro") },
-                    leadingIcon = { Icon(Icons.Outlined.LightMode, contentDescription = null) },
-                    trailingIcon = { if (currentTheme == ThemePreference.LIGHT) Icon(Icons.Rounded.Check, null) },
+                    leadingIcon = { Icon(FolioIcons.Outlined.LightMode, contentDescription = null) },
+                    trailingIcon = { if (currentTheme == ThemePreference.LIGHT) Icon(FolioIcons.Rounded.Check, null) },
                     onClick = { onSelectTheme(ThemePreference.LIGHT) }
                 )
                 DropdownMenuItem(
                     text = { Text("Modo escuro") },
-                    leadingIcon = { Icon(Icons.Outlined.DarkMode, contentDescription = null) },
-                    trailingIcon = { if (currentTheme == ThemePreference.DARK) Icon(Icons.Rounded.Check, null) },
+                    leadingIcon = { Icon(FolioIcons.Outlined.DarkMode, contentDescription = null) },
+                    trailingIcon = { if (currentTheme == ThemePreference.DARK) Icon(FolioIcons.Rounded.Check, null) },
                     onClick = { onSelectTheme(ThemePreference.DARK) }
                 )
                 DropdownMenuItem(
                     text = { Text("Dispositivo") },
-                    leadingIcon = { Icon(Icons.Outlined.Smartphone, contentDescription = null) },
-                    trailingIcon = { if (currentTheme == ThemePreference.SYSTEM) Icon(Icons.Rounded.Check, null) },
+                    leadingIcon = { Icon(FolioIcons.Outlined.Smartphone, contentDescription = null) },
+                    trailingIcon = { if (currentTheme == ThemePreference.SYSTEM) Icon(FolioIcons.Rounded.Check, null) },
                     onClick = { onSelectTheme(ThemePreference.SYSTEM) }
                 )
             }
@@ -495,10 +477,10 @@ private fun SearchHeaderBar(
             value = query,
             onValueChange = onQueryChange,
             placeholder = { Text("Pesquisar notebooks, fontes e conversas...") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            leadingIcon = { Icon(FolioIcons.Rounded.Search, contentDescription = null) },
             trailingIcon = {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Fechar busca")
+                    Icon(FolioIcons.Rounded.Close, contentDescription = "Fechar busca")
                 }
             },
             singleLine = true,
@@ -547,7 +529,7 @@ private fun MyNotebooksBody(
                     modifier = Modifier.testTag("sort_notebooks_button")
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.Sort,
+                        imageVector = FolioIcons.AutoMirrored.Rounded.Sort,
                         contentDescription = "Ordenar notebooks (${state.sortMode.label})",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -570,7 +552,7 @@ private fun MyNotebooksBody(
                 AssistChip(
                     onClick = onClearCollectionFilter,
                     label = { Text("Coleção: ${activeCollection.name} (Limpar filtro)") },
-                    trailingIcon = { Icon(Icons.Rounded.Close, null, Modifier.size(16.dp)) },
+                    trailingIcon = { Icon(FolioIcons.Rounded.Close, null, Modifier.size(16.dp)) },
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                 )
             }
@@ -635,7 +617,7 @@ private fun CollectionsBody(
                     shape = CircleShape,
                     modifier = Modifier.testTag("create_collection_button")
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Nova coleção")
                 }
@@ -718,12 +700,12 @@ private fun CollectionsBody(
                     )
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "Opções da coleção")
+                            Icon(FolioIcons.Rounded.MoreVert, contentDescription = "Opções da coleção")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
                                 text = { Text("Excluir coleção") },
-                                leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null) },
                                 onClick = {
                                     menuOpen = false
                                     onDeleteCollection(collection.id)
@@ -876,7 +858,7 @@ private fun NotebookRowItem(
                 if (notebook.isPinned) {
                     Spacer(Modifier.width(6.dp))
                     Icon(
-                        imageVector = Icons.Rounded.PushPin,
+                        imageVector = FolioIcons.Rounded.PushPin,
                         contentDescription = "Fixado",
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(14.dp)
@@ -893,7 +875,7 @@ private fun NotebookRowItem(
         Box {
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(
-                    imageVector = Icons.Rounded.MoreVert,
+                    imageVector = FolioIcons.Rounded.MoreVert,
                     contentDescription = "Menu do notebook",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -901,7 +883,7 @@ private fun NotebookRowItem(
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
                     text = { Text(if (notebook.isPinned) "Desafixar" else "Fixar") },
-                    leadingIcon = { Icon(Icons.Rounded.PushPin, null) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.PushPin, null) },
                     onClick = {
                         menuExpanded = false
                         onTogglePin()
@@ -909,7 +891,7 @@ private fun NotebookRowItem(
                 )
                 DropdownMenuItem(
                     text = { Text("Personalizar") },
-                    leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.Edit, null) },
                     onClick = {
                         menuExpanded = false
                         onEdit()
@@ -917,7 +899,7 @@ private fun NotebookRowItem(
                 )
                 DropdownMenuItem(
                     text = { Text("Mover para coleção") },
-                    leadingIcon = { Icon(Icons.Rounded.DriveFileMove, null) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.DriveFileMove, null) },
                     onClick = {
                         menuExpanded = false
                         onMoveCollection()
@@ -925,7 +907,7 @@ private fun NotebookRowItem(
                 )
                 DropdownMenuItem(
                     text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                    leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                     onClick = {
                         menuExpanded = false
                         onDelete()
@@ -1076,7 +1058,7 @@ private fun EmptyNotebooksCard(
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = onCreateNotebook, shape = CircleShape) {
-                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                    Icon(FolioIcons.Rounded.Add, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Criar notebook")
                 }
@@ -1151,7 +1133,7 @@ private fun NotebookEditorDialog(
                                     onClick = { selectedColId = null },
                                     label = { Text("Nenhuma") },
                                     leadingIcon = if (selectedColId == null) {
-                                        { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                                        { Icon(FolioIcons.Rounded.Check, null, Modifier.size(16.dp)) }
                                     } else null
                                 )
                             }
@@ -1160,7 +1142,7 @@ private fun NotebookEditorDialog(
                                     onClick = { selectedColId = col.id },
                                     label = { Text(col.name) },
                                     leadingIcon = if (selectedColId == col.id) {
-                                        { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                                        { Icon(FolioIcons.Rounded.Check, null, Modifier.size(16.dp)) }
                                     } else null
                                 )
                             }
@@ -1200,7 +1182,7 @@ private fun MoveCollectionDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Sem coleção", modifier = Modifier.weight(1f))
-                    if (notebook.collectionId == null) Icon(Icons.Rounded.Check, null)
+                    if (notebook.collectionId == null) Icon(FolioIcons.Rounded.Check, null)
                 }
                 collections.forEach { col ->
                     TextButton(
@@ -1208,7 +1190,7 @@ private fun MoveCollectionDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(col.name, modifier = Modifier.weight(1f))
-                        if (notebook.collectionId == col.id) Icon(Icons.Rounded.Check, null)
+                        if (notebook.collectionId == col.id) Icon(FolioIcons.Rounded.Check, null)
                     }
                 }
             }

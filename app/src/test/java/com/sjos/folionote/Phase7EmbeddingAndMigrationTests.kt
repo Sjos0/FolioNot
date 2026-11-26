@@ -25,7 +25,9 @@ import com.sjos.folionote.engine.ai.ChatCompletionRequest
 import com.sjos.folionote.engine.ai.ChatStreamEvent
 import com.sjos.folionote.engine.ai.ConnectionTestResult
 import com.sjos.folionote.engine.ai.DiscoveredModel
+import com.sjos.folionote.engine.ai.ModelLimitsValidator
 import com.sjos.folionote.engine.context.ContextBudgetPlanner
+import com.sjos.folionote.engine.context.ContextPlanResult
 import com.sjos.folionote.engine.indexing.CompositeEmbeddingProvider
 import com.sjos.folionote.engine.indexing.EmbeddingTaskType
 import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
@@ -456,7 +458,7 @@ class Phase7EmbeddingAndMigrationTests {
             helper.close()
 
             migratedDb = Room.databaseBuilder(context, FolioNoteDatabase::class.java, dbName)
-                .addMigrations(FolioNoteDatabase.MIGRATION_1_2)
+                .addMigrations(FolioNoteDatabase.MIGRATION_1_2, FolioNoteDatabase.MIGRATION_2_3)
                 .allowMainThreadQueries()
                 .build()
 
@@ -537,5 +539,145 @@ class Phase7EmbeddingAndMigrationTests {
         db.execSQL("CREATE TABLE IF NOT EXISTS `studio_artifacts` (`id` TEXT NOT NULL, `notebookId` TEXT NOT NULL, `artifactType` TEXT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `sourceCount` INTEGER NOT NULL, `modelDisplayName` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`notebookId`) REFERENCES `notebooks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_studio_artifacts_notebookId` ON `studio_artifacts` (`notebookId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_studio_artifacts_updatedAt` ON `studio_artifacts` (`updatedAt`)")
+    }
+
+    @Test
+    fun `room migration 2 to 3 adds isPartial column with default false and preserves messages`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "migration_2_3_test_${System.nanoTime()}.db"
+        val dbFile = context.getDatabasePath(dbName)
+        dbFile.parentFile?.mkdirs()
+
+        val callback = object : SupportSQLiteOpenHelper.Callback(2) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                createV1Schema(db)
+                FolioNoteDatabase.MIGRATION_1_2.migrate(db)
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(dbName)
+                .callback(callback)
+                .build()
+        )
+
+        var migratedDb: FolioNoteDatabase? = null
+        try {
+            val v2Db = helper.writableDatabase
+            v2Db.execSQL("INSERT INTO notebooks (id, title, description, iconKey, collectionId, isPinned, createdAt, updatedAt) VALUES ('nb2', 'V2', '', 'book', NULL, 0, 100, 100)")
+            v2Db.execSQL("INSERT INTO conversations (id, notebookId, title, selectedModelInternalId, systemRolePreset, customSystemPrompt, responseLength, runningSummary, summarizedUpToOrder, createdAt, updatedAt) VALUES ('conv2', 'nb2', 'Chat V2', NULL, 'DEFAULT', '', 'DEFAULT', '', 0, 100, 100)")
+            v2Db.execSQL("INSERT INTO messages (id, conversationId, role, content, modelDisplayName, toolCallsJson, toolCallId, tokenCountEstimate, contextTokensUsed, isPinned, isError, orderIndex, createdAt) VALUES ('msg2', 'conv2', 'ASSISTANT', 'Resposta v2 intacta', 'GPT', NULL, NULL, 5, 10, 0, 0, 1, 100)")
+            v2Db.close()
+            helper.close()
+
+            migratedDb = Room.databaseBuilder(context, FolioNoteDatabase::class.java, dbName)
+                .addMigrations(FolioNoteDatabase.MIGRATION_1_2, FolioNoteDatabase.MIGRATION_2_3)
+                .allowMainThreadQueries()
+                .build()
+
+            val msgs = migratedDb.conversationAndMessageDao().getMessagesForConversationOnce("conv2")
+            assertEquals(1, msgs.size)
+            assertEquals("Resposta v2 intacta", msgs.first().content)
+            assertFalse(msgs.first().isPartial)
+        } finally {
+            migratedDb?.close()
+            File(dbFile.path).delete()
+            File("${dbFile.path}-wal").delete()
+            File("${dbFile.path}-shm").delete()
+        }
+    }
+
+    @Test
+    fun `model limits validator rejects empty zero negative huge inputs and maxOutput above contextWindow and room persists updates`() = runTest {
+        // Invalid inputs never fall back silently
+        val empty = ModelLimitsValidator.validate("", "2048")
+        assertFalse(empty.isValid)
+        assertNull(empty.contextWindow)
+        assertNotNull(empty.contextWindowError)
+
+        val zero = ModelLimitsValidator.validate("0", "2048")
+        assertFalse(zero.isValid)
+        assertNull(zero.contextWindow)
+        assertNotNull(zero.contextWindowError)
+
+        val negative = ModelLimitsValidator.validate("-500", "2048")
+        assertFalse(negative.isValid)
+        assertNull(negative.contextWindow)
+        assertNotNull(negative.contextWindowError)
+
+        val huge = ModelLimitsValidator.validate("99999999999", "2048")
+        assertFalse(huge.isValid)
+        assertNull(huge.contextWindow)
+        assertNotNull(huge.contextWindowError)
+
+        val maxOutTooBig = ModelLimitsValidator.validate("4096", "8192")
+        assertFalse(maxOutTooBig.isValid)
+        assertNotNull(maxOutTooBig.maxOutputTokensError)
+
+        val valid = ModelLimitsValidator.validate("128000", "8192")
+        assertTrue(valid.isValid)
+        assertEquals(128000, valid.contextWindow)
+        assertEquals(8192, valid.maxOutputTokens)
+
+        // Overflow protection in ContextBudgetPlanner and Studio budgetChars
+        val studioChars = ModelLimitsValidator.computeStudioBudgetChars(Int.MAX_VALUE, 8192)
+        assertTrue(studioChars in 3000..ModelLimitsValidator.MAX_STUDIO_CONTEXT_CHARS)
+
+        val planner = ContextBudgetPlanner()
+        val extremeModel = ModelEntity("m_big", "p1", "big", "Big", contextWindow = Int.MAX_VALUE, maxOutputTokens = 8192)
+        val conv = com.sjos.folionote.data.local.ConversationEntity("c_big", "nb_big", "Big")
+        val plan = planner.buildContextPlan(extremeModel, conv, emptyList(), "Resumo", emptyList(), emptyList())
+        assertTrue(plan is ContextPlanResult.Ready)
+        val ready = plan as ContextPlanResult.Ready
+        assertTrue(ready.report.availableInputBudget > 0)
+
+        // Room persistence after close & reopen
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "model_limits_persist_${System.nanoTime()}.db"
+        val dbFile = context.getDatabasePath(dbName)
+        var db1: FolioNoteDatabase? = null
+        var db2: FolioNoteDatabase? = null
+        try {
+            db1 = Room.databaseBuilder(context, FolioNoteDatabase::class.java, dbName)
+                .allowMainThreadQueries()
+                .build()
+            db1.providerAndModelDao().upsertProvider(ProviderEntity("p_persist", "OpenAI", "https://api.openai.com/v1"))
+            val initialModel = ModelEntity(
+                id = "m_persist",
+                providerId = "p_persist",
+                modelId = "gpt-4o",
+                displayName = "GPT-4o",
+                contextWindow = 8192,
+                maxOutputTokens = 2048
+            )
+            db1.providerAndModelDao().upsertModel(initialModel)
+            // Simulate user editing existing model contextWindow to 262144 and maxOutput to 16384
+            val validatedEdit = ModelLimitsValidator.validate("262144", "16384")
+            assertTrue(validatedEdit.isValid)
+            db1.providerAndModelDao().upsertModel(
+                initialModel.copy(
+                    contextWindow = validatedEdit.contextWindow!!,
+                    maxOutputTokens = validatedEdit.maxOutputTokens!!
+                )
+            )
+            db1.close()
+            db1 = null
+
+            db2 = Room.databaseBuilder(context, FolioNoteDatabase::class.java, dbName)
+                .allowMainThreadQueries()
+                .build()
+            val reloaded = db2.providerAndModelDao().getModelByInternalId("m_persist")
+            assertNotNull(reloaded)
+            assertEquals(262144, reloaded?.contextWindow)
+            assertEquals(16384, reloaded?.maxOutputTokens)
+        } finally {
+            db1?.close()
+            db2?.close()
+            File(dbFile.path).delete()
+            File("${dbFile.path}-wal").delete()
+            File("${dbFile.path}-shm").delete()
+        }
     }
 }

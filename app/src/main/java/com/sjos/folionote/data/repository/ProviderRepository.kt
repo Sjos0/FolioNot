@@ -145,7 +145,10 @@ class ProviderRepository(
                 )
             } else {
                 val isEmb = item.modelId.contains("embed", ignoreCase = true)
-                val guessedContext = item.contextLengthHint ?: 8192
+                val guessedContext = (item.contextLengthHint ?: 8192).coerceIn(
+                    com.sjos.folionote.engine.ai.ModelLimitsValidator.MIN_CONTEXT_WINDOW,
+                    com.sjos.folionote.engine.ai.ModelLimitsValidator.MAX_CONTEXT_WINDOW
+                )
                 toSave.add(
                     ModelEntity(
                         id = UUID.randomUUID().toString(),
@@ -153,7 +156,10 @@ class ProviderRepository(
                         modelId = item.modelId,
                         displayName = item.displayName,
                         contextWindow = guessedContext,
-                        maxOutputTokens = (guessedContext / 4).coerceIn(512, 4096),
+                        maxOutputTokens = (guessedContext / 4).coerceIn(
+                            com.sjos.folionote.engine.ai.ModelLimitsValidator.MIN_MAX_OUTPUT_TOKENS,
+                            minOf(4096, guessedContext)
+                        ),
                         supportsStreaming = !isEmb,
                         supportsTools = false,
                         supportsSystemMessage = true,

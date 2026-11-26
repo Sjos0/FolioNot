@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -25,22 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DataUsage
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -77,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sjos.folionote.ui.components.FolioLogoMark
 import com.sjos.folionote.ui.components.FormatUtils
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,7 +133,7 @@ fun NotebookWorkspaceScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = WindowInsets.safeDrawing.exclude(WindowInsets.ime),
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
@@ -164,11 +151,12 @@ fun NotebookWorkspaceScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .testTag("workspace_topbar"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("notebook_back_button")) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
+                        Icon(FolioIcons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
                     }
                     FolioLogoMark(modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(8.dp))
@@ -183,14 +171,14 @@ fun NotebookWorkspaceScreen(
                         onClick = { viewModel.startNewConversation() },
                         modifier = Modifier.testTag("new_conversation_button")
                     ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Nova conversa")
+                        Icon(FolioIcons.Rounded.Add, contentDescription = "Nova conversa")
                     }
                     Box {
                         IconButton(
                             onClick = { showOverflowMenu = true },
                             modifier = Modifier.testTag("notebook_overflow_button")
                         ) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "Mais opções")
+                            Icon(FolioIcons.Rounded.MoreVert, contentDescription = "Mais opções")
                         }
                         DropdownMenu(
                             expanded = showOverflowMenu,
@@ -198,7 +186,7 @@ fun NotebookWorkspaceScreen(
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Configurar as conversas") },
-                                leadingIcon = { Icon(Icons.Rounded.Tune, null) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.Tune, null) },
                                 onClick = {
                                     showOverflowMenu = false
                                     showConfigSheet = true
@@ -206,7 +194,7 @@ fun NotebookWorkspaceScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("Personalizar notebook") },
-                                leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.Edit, null) },
                                 onClick = {
                                     showOverflowMenu = false
                                     showCustomizeDialog = true
@@ -214,7 +202,7 @@ fun NotebookWorkspaceScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("Histórico de conversas") },
-                                leadingIcon = { Icon(Icons.Rounded.History, null) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.History, null) },
                                 onClick = {
                                     showOverflowMenu = false
                                     showHistorySheet = true
@@ -222,7 +210,7 @@ fun NotebookWorkspaceScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("Orçamento de contexto") },
-                                leadingIcon = { Icon(Icons.Rounded.DataUsage, null) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.DataUsage, null) },
                                 onClick = {
                                     showOverflowMenu = false
                                     showBudgetDialog = true
@@ -230,7 +218,7 @@ fun NotebookWorkspaceScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("Configurações (Embeddings, OCR, Drive)") },
-                                leadingIcon = { Icon(Icons.Outlined.Settings, null) },
+                                leadingIcon = { Icon(FolioIcons.Outlined.Settings, null) },
                                 onClick = {
                                     showOverflowMenu = false
                                     onOpenSettings()
@@ -239,7 +227,7 @@ fun NotebookWorkspaceScreen(
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Excluir histórico de conversa", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showOverflowMenu = false
                                     viewModel.clearActiveConversationHistory()
@@ -248,7 +236,7 @@ fun NotebookWorkspaceScreen(
                         }
                     }
                     IconButton(onClick = onOpenProviders) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Provedores e Modelos")
+                        Icon(FolioIcons.Outlined.Settings, contentDescription = "Provedores e Modelos")
                     }
                 }
 
@@ -400,7 +388,7 @@ fun NotebookWorkspaceScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (active) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
+                            if (active) Icon(FolioIcons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -499,7 +487,7 @@ fun NotebookWorkspaceScreen(
                         .fillMaxWidth()
                         .testTag("drive_saf_picker_button")
                 ) {
-                    Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
+                    Icon(FolioIcons.Outlined.FolderOpen, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Selecionar pelo Seletor do Android")
                 }
@@ -517,7 +505,7 @@ fun NotebookWorkspaceScreen(
                         .fillMaxWidth()
                         .testTag("drive_inapp_browser_button")
                 ) {
-                    Icon(Icons.Outlined.CloudDownload, null, Modifier.size(18.dp))
+                    Icon(FolioIcons.Outlined.CloudDownload, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Navegar no Google Drive (somente leitura)")
                 }
@@ -560,11 +548,11 @@ fun NotebookWorkspaceScreen(
                         value = state.driveImportSearchQuery,
                         onValueChange = viewModel::searchDriveImportFiles,
                         placeholder = { Text("Filtrar arquivos no Google Drive...") },
-                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                        leadingIcon = { Icon(FolioIcons.Rounded.Search, null) },
                         trailingIcon = {
                             if (state.driveImportSearchQuery.isNotBlank()) {
                                 IconButton(onClick = { viewModel.searchDriveImportFiles("") }) {
-                                    Icon(Icons.Rounded.Close, "Limpar")
+                                    Icon(FolioIcons.Rounded.Close, "Limpar")
                                 }
                             }
                         },
@@ -597,7 +585,7 @@ fun NotebookWorkspaceScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        Icons.Outlined.Description,
+                                        FolioIcons.Outlined.Description,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary
                                     )

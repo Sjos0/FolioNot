@@ -1,6 +1,8 @@
 package com.sjos.folionote
 
 import android.content.Context
+import android.os.Looper
+import android.os.StrictMode
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.sjos.folionote.core.preferences.AppPreferencesStore
@@ -29,24 +31,38 @@ import com.sjos.folionote.engine.indexing.OpenAiCompatibleEmbeddingProvider
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.tools.ToolEngine
 import com.sun.net.httpserver.HttpServer
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -384,8 +400,241 @@ class AiAndEmbeddingClientTests {
 
             val msgsAfterCancel = db.conversationAndMessageDao().getMessagesForConversationOnce(conv.id)
             val savedPartial = msgsAfterCancel.lastOrNull { it.role == MessageRole.ASSISTANT.name }
-            assertTrue(savedPartial?.content?.contains("Trecho parcial importante") == true)
-            assertTrue(savedPartial?.content?.contains("interrompida pelo usuário") == true)
+            assertEquals("Trecho parcial importante", savedPartial?.content)
+            assertEquals(true, savedPartial?.isPartial)
+            assertEquals(false, savedPartial?.isError)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun `mockwebserver streamChatCompletion works from Main dispatcher without NetworkOnMainThreadException across SSE non-stream HTTP 500 and mid-stream cancel`() {
+        val server = MockWebServer()
+        server.start()
+        val crypto = KeystoreCryptoManager()
+        val client = OpenAiCompatibleClient(crypto, OkHttpClient())
+        val baseUrl = server.url("/v1").toString().trimEnd('/')
+        val provider = ProviderEntity(
+            id = "p_mock",
+            name = "MockWebServer",
+            baseUrl = baseUrl,
+            encryptedApiKey = crypto.encrypt("sk-mock-123"),
+            supportsStreamingDefault = true
+        )
+        val streamingModel = ModelEntity(
+            id = "m_stream",
+            providerId = provider.id,
+            modelId = "gpt-stream",
+            displayName = "GPT Stream",
+            supportsStreaming = true
+        )
+        val nonStreamingModel = streamingModel.copy(
+            id = "m_nonstream",
+            modelId = "gpt-sync",
+            supportsStreaming = false
+        )
+
+        fun <T> collectOnMainLooper(block: suspend () -> T): T {
+            val deferred = CompletableDeferred<T>()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            scope.launch {
+                try {
+                    deferred.complete(block())
+                } catch (t: Throwable) {
+                    deferred.completeExceptionally(t)
+                }
+            }
+            val deadline = System.currentTimeMillis() + 10_000L
+            while (!deferred.isCompleted) {
+                if (System.currentTimeMillis() > deadline) {
+                    scope.coroutineContext[Job]?.cancel()
+                    throw AssertionError("Timeout waiting for Main dispatcher coroutine")
+                }
+                Shadows.shadowOf(Looper.getMainLooper()).idle()
+                Thread.sleep(10)
+            }
+            return runBlocking { deferred.await() }
+        }
+
+        val previousPolicy = StrictMode.getThreadPolicy()
+        try {
+            // Enforce StrictMode on Main thread so any socket I/O or body.close() on Main throws immediately
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectNetwork()
+                    .penaltyDeath()
+                    .build()
+            )
+
+            // 1. SSE stream OK collected directly on Dispatchers.Main
+            val sseBody = """
+                data: {"choices":[{"delta":{"content":"Olá "}}]}
+
+                data: {"choices":[{"delta":{"content":"FolioNote"}}]}
+
+                data: [DONE]
+
+            """.trimIndent()
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(sseBody)
+            )
+            val sseEvents = collectOnMainLooper {
+                client.streamChatCompletion(
+                    provider = provider,
+                    model = streamingModel,
+                    request = ChatCompletionRequest(listOf(ChatMessagePayload("user", "Oi")), stream = true)
+                ).toList()
+            }
+            assertEquals(
+                "Olá FolioNote",
+                sseEvents.filterIsInstance<ChatStreamEvent.TextDelta>().joinToString("") { it.text }
+            )
+            assertTrue(sseEvents.any { it is ChatStreamEvent.Completed })
+
+            // 2. Non-stream JSON response OK collected on Main
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"choices":[{"message":{"content":"Resposta síncrona OK"},"finish_reason":"stop"}]}""")
+            )
+            val nonStreamEvents = collectOnMainLooper {
+                client.streamChatCompletion(
+                    provider = provider,
+                    model = nonStreamingModel,
+                    request = ChatCompletionRequest(listOf(ChatMessagePayload("user", "Oi")), stream = false)
+                ).toList()
+            }
+            assertEquals(
+                "Resposta síncrona OK",
+                nonStreamEvents.filterIsInstance<ChatStreamEvent.TextDelta>().joinToString("") { it.text }
+            )
+            assertTrue(nonStreamEvents.any { it is ChatStreamEvent.Completed })
+
+            // 3. HTTP 500 emits ChatStreamEvent.Error without throwing
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(500)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"error":{"message":"Upstream crashed"}}""")
+            )
+            val errEvents = collectOnMainLooper {
+                client.streamChatCompletion(
+                    provider = provider,
+                    model = streamingModel,
+                    request = ChatCompletionRequest(listOf(ChatMessagePayload("user", "Oi")), stream = true)
+                ).toList()
+            }
+            val err = errEvents.filterIsInstance<ChatStreamEvent.Error>().firstOrNull()
+            assertEquals(500, err?.httpCode)
+            assertTrue(err?.message?.contains("Upstream crashed") == true)
+
+            // 4. Mid-stream cancel closes call cleanly without hanging
+            val chunkedSlowSse = "data: {\"choices\":[{\"delta\":{\"content\":\"Parte 1\"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Parte 2\"}}]}\n\n"
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/event-stream")
+                    .setBody(chunkedSlowSse)
+                    .throttleBody(48, 250, TimeUnit.MILLISECONDS)
+                    .setSocketPolicy(SocketPolicy.KEEP_OPEN)
+            )
+            val firstDelta = collectOnMainLooper {
+                withTimeout(5_000) {
+                    client.streamChatCompletion(
+                        provider = provider,
+                        model = streamingModel,
+                        request = ChatCompletionRequest(listOf(ChatMessagePayload("user", "Oi")), stream = true)
+                    ).take(1).toList()
+                }
+            }
+            assertEquals(1, firstDelta.size)
+            assertTrue(firstDelta.first() is ChatStreamEvent.TextDelta)
+        } finally {
+            StrictMode.setThreadPolicy(previousPolicy)
+            runCatching { server.shutdown() }
+        }
+    }
+
+    @Test
+    fun `chat orchestrator keeps errors in error state saves clean partial text and resets isStreaming`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, FolioNoteDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val prefs = AppPreferencesStore(context)
+
+        try {
+            db.notebookDao().upsertNotebook(NotebookEntity("nb_err", "Caderno Erro"))
+            db.toolAndJobDao().upsertTools(ToolEngine.builtInTools())
+            val provider = ProviderEntity("p_err", "Mock", "http://localhost")
+            val model = ModelEntity("m_err", "p_err", "mock-chat", "Mock Chat")
+            db.providerAndModelDao().upsertProvider(provider)
+            db.providerAndModelDao().upsertModel(model)
+
+            var emitPartialBeforeError = false
+            val fakeAi = object : AiProviderClient {
+                override suspend fun testConnection(provider: ProviderEntity) = ConnectionTestResult(true, 1, "OK")
+                override suspend fun fetchModels(provider: ProviderEntity) = Result.success(emptyList<DiscoveredModel>())
+                override fun streamChatCompletion(
+                    provider: ProviderEntity,
+                    model: ModelEntity,
+                    request: ChatCompletionRequest
+                ): Flow<ChatStreamEvent> = flow {
+                    if (emitPartialBeforeError) {
+                        emit(ChatStreamEvent.TextDelta("Texto parcial útil"))
+                    }
+                    emit(ChatStreamEvent.Error("Falha de rede 500", 500))
+                }
+            }
+
+            val crypto = KeystoreCryptoManager()
+            val embeddingProvider = CompositeEmbeddingProvider(
+                OpenAiCompatibleEmbeddingProvider(crypto),
+                GeminiEmbeddingProvider(crypto)
+            )
+            val orchestrator = ChatOrchestrator(
+                db = db,
+                aiClient = fakeAi,
+                embeddingProvider = embeddingProvider,
+                geminiEmbeddingManager = GeminiEmbeddingManager(prefs, crypto, embeddingProvider),
+                retriever = HybridRetriever(),
+                budgetPlanner = ContextBudgetPlanner(),
+                toolEngine = ToolEngine(
+                    db.sourceDao(),
+                    db.chunkAndEmbeddingDao(),
+                    db.conversationAndMessageDao(),
+                    db.notebookDao(),
+                    HybridRetriever()
+                ),
+                preferencesStore = prefs
+            )
+            val conv = orchestrator.createNewConversation("nb_err", "Erros", model.id)
+
+            // Case 1: Pure error -> no assistant error message persisted, isStreaming resets, errorMessage set
+            orchestrator.sendMessage("nb_err", conv.id, "Pergunta 1", model.id)
+            assertFalse(orchestrator.runtimeState.value.isStreaming)
+            assertEquals("", orchestrator.runtimeState.value.streamingText)
+            assertEquals("Falha de rede 500", orchestrator.runtimeState.value.errorMessage)
+            val msgsAfterPureErr = db.conversationAndMessageDao().getMessagesForConversationOnce(conv.id)
+            assertEquals(1, msgsAfterPureErr.size) // Only the USER message
+            assertEquals(MessageRole.USER.name, msgsAfterPureErr.first().role)
+
+            // Case 2: Partial text before error -> saved cleanly with isPartial = true and no error text inside message
+            emitPartialBeforeError = true
+            orchestrator.sendMessage("nb_err", conv.id, "Pergunta 2", model.id)
+            assertFalse(orchestrator.runtimeState.value.isStreaming)
+            assertEquals("Falha de rede 500", orchestrator.runtimeState.value.errorMessage)
+            val msgsAfterPartialErr = db.conversationAndMessageDao().getMessagesForConversationOnce(conv.id)
+            val assistantPartial = msgsAfterPartialErr.last { it.role == MessageRole.ASSISTANT.name }
+            assertEquals("Texto parcial útil", assistantPartial.content)
+            assertTrue(assistantPartial.isPartial)
+            assertFalse(assistantPartial.isError)
         } finally {
             db.close()
         }

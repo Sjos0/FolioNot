@@ -1,5 +1,7 @@
 package com.sjos.folionote.engine.indexing
 
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.security.KeystoreCryptoManager
 import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ProviderEntity
@@ -12,7 +14,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 enum class EmbeddingTaskType {
     DOCUMENT,
@@ -68,7 +69,7 @@ internal fun applyProviderHeaders(
 
 class OpenAiCompatibleEmbeddingProvider(
     private val cryptoManager: KeystoreCryptoManager,
-    private val baseHttpClient: OkHttpClient = OkHttpClient()
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient
 ) : EmbeddingProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -99,12 +100,10 @@ class OpenAiCompatibleEmbeddingProvider(
         applyProviderHeaders(reqBuilder, provider, cryptoManager)
 
         runCatching {
-            val timeout = provider.timeoutSeconds.coerceIn(10, 180).toLong()
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(timeout, TimeUnit.SECONDS)
-                .build()
+            val timeout = provider.timeoutSeconds.coerceIn(10, 180)
+            reqBuilder.tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = timeout))
 
-            client.newCall(reqBuilder.build()).execute().use { response ->
+            baseHttpClient.newCall(reqBuilder.build()).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw IllegalStateException("Erro de embeddings HTTP ${response.code}: ${raw.take(200)}")
@@ -141,7 +140,7 @@ class OpenAiCompatibleEmbeddingProvider(
  */
 class GeminiEmbeddingProvider(
     private val cryptoManager: KeystoreCryptoManager,
-    private val baseHttpClient: OkHttpClient = OkHttpClient()
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient
 ) : EmbeddingProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -176,12 +175,10 @@ class GeminiEmbeddingProvider(
         applyProviderHeaders(reqBuilder, effectiveProvider, cryptoManager)
 
         runCatching {
-            val timeout = provider.timeoutSeconds.coerceIn(10, 180).toLong()
-            val client = baseHttpClient.newBuilder()
-                .readTimeout(timeout, TimeUnit.SECONDS)
-                .build()
+            val timeout = provider.timeoutSeconds.coerceIn(10, 180)
+            reqBuilder.tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = timeout))
 
-            client.newCall(reqBuilder.build()).execute().use { response ->
+            baseHttpClient.newCall(reqBuilder.build()).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw IllegalStateException("Erro Gemini Embedding HTTP ${response.code}: ${raw.take(220)}")

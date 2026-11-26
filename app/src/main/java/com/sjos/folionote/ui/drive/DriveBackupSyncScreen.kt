@@ -21,19 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Restore
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,6 +59,7 @@ import com.sjos.folionote.engine.drive.ConflictResolutionChoice
 import com.sjos.folionote.engine.drive.DriveFileItem
 import com.sjos.folionote.ui.components.FormatUtils
 import com.sjos.folionote.ui.settings.GoogleAvatar
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -121,7 +109,7 @@ fun DriveBackupSyncScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("drive_back_button")) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
+                        Icon(FolioIcons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
                     }
                     Text(
                         text = "Google Drive — Backups e Sync",
@@ -133,7 +121,7 @@ fun DriveBackupSyncScreen(
                             onClick = viewModel::refreshBackups,
                             enabled = !runtime.isBusy
                         ) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar lista de backups")
+                            Icon(FolioIcons.Rounded.Refresh, contentDescription = "Atualizar lista de backups")
                         }
                     }
                 }
@@ -156,7 +144,7 @@ fun DriveBackupSyncScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Icon(
-                                        Icons.Outlined.CloudOff,
+                                        FolioIcons.Outlined.CloudOff,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.secondary,
                                         modifier = Modifier.size(40.dp)
@@ -204,7 +192,7 @@ fun DriveBackupSyncScreen(
                                             )
                                         }
                                         IconButton(onClick = viewModel::refreshProfile) {
-                                            Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar perfil")
+                                            Icon(FolioIcons.Rounded.Refresh, contentDescription = "Atualizar perfil")
                                         }
                                     }
 
@@ -297,7 +285,7 @@ fun DriveBackupSyncScreen(
                                                     modifier = Modifier.weight(1f)
                                                 )
                                                 IconButton(onClick = viewModel::clearError, modifier = Modifier.size(28.dp)) {
-                                                    Icon(Icons.Rounded.Close, contentDescription = "Fechar erro")
+                                                    Icon(FolioIcons.Rounded.Close, contentDescription = "Fechar erro")
                                                 }
                                             }
                                         }
@@ -313,7 +301,7 @@ fun DriveBackupSyncScreen(
                                             shape = CircleShape,
                                             modifier = Modifier.testTag("drive_sync_now_button")
                                         ) {
-                                            Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.Rounded.Sync, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Sincronizar agora")
                                         }
@@ -324,7 +312,7 @@ fun DriveBackupSyncScreen(
                                             shape = CircleShape,
                                             modifier = Modifier.testTag("drive_create_backup_button")
                                         ) {
-                                            Icon(Icons.Rounded.Add, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.Rounded.Add, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Criar Backup")
                                         }
@@ -389,7 +377,7 @@ fun DriveBackupSyncScreen(
                                         modifier = Modifier.padding(20.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Icon(Icons.Outlined.Backup, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(34.dp))
+                                        Icon(FolioIcons.Outlined.Backup, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(34.dp))
                                         Spacer(Modifier.height(8.dp))
                                         Text("Nenhum backup salvo no Google Drive", style = MaterialTheme.typography.titleSmall)
                                         Text(
@@ -550,7 +538,7 @@ private fun ConflictResolutionCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(18.dp))
+                Icon(FolioIcons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = "${conflict.entityType}: ${conflict.title}",
@@ -607,7 +595,7 @@ private fun BackupRowCard(
             modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Outlined.Backup, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(FolioIcons.Outlined.Backup, null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -631,12 +619,12 @@ private fun BackupRowCard(
             }
             Box {
                 IconButton(onClick = { menuOpen = true }, enabled = !busy) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Ações do backup")
+                    Icon(FolioIcons.Rounded.MoreVert, contentDescription = "Ações do backup")
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Text("Restaurar") },
-                        leadingIcon = { Icon(Icons.Outlined.Restore, null) },
+                        leadingIcon = { Icon(FolioIcons.Outlined.Restore, null) },
                         onClick = {
                             menuOpen = false
                             onRestore()
@@ -644,7 +632,7 @@ private fun BackupRowCard(
                     )
                     DropdownMenuItem(
                         text = { Text("Renomear") },
-                        leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                        leadingIcon = { Icon(FolioIcons.Outlined.Edit, null) },
                         onClick = {
                             menuOpen = false
                             onRename()
@@ -652,7 +640,7 @@ private fun BackupRowCard(
                     )
                     DropdownMenuItem(
                         text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(FolioIcons.Outlined.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                         onClick = {
                             menuOpen = false
                             onDelete()

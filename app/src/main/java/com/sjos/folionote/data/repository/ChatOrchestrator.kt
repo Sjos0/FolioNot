@@ -28,6 +28,7 @@ import com.sjos.folionote.engine.indexing.GeminiEmbeddingManager
 import com.sjos.folionote.engine.retrieval.HybridRetriever
 import com.sjos.folionote.engine.tools.ToolEngine
 import com.sjos.folionote.engine.tools.ToolExecutionOutcome
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -209,9 +210,10 @@ class ChatOrchestrator(
         val pending = _runtimeState.value.pendingToolApproval ?: return
         _runtimeState.value = _runtimeState.value.copy(pendingToolApproval = null)
 
-        val model = providerDao.getModelByInternalId(pending.modelInternalId) ?: return
-        val provider = providerDao.getProviderById(model.providerId) ?: return
-        val enabledTools = toolDao.getEnabledToolsOnce()
+        try {
+            val model = providerDao.getModelByInternalId(pending.modelInternalId) ?: return
+            val provider = providerDao.getProviderById(model.providerId) ?: return
+            val enabledTools = toolDao.getEnabledToolsOnce()
 
         val outcome = if (approved) {
             toolEngine.evaluateAndExecute(pending.notebookId, pending.call, enabledTools, userApproved = true)
@@ -278,16 +280,30 @@ class ChatOrchestrator(
             }
         }
 
-        executeModelLoop(
-            notebookId = pending.notebookId,
-            conversationId = pending.conversationId,
-            model = model,
-            provider = provider,
-            messagesPayload = nextMessages,
-            citations = pending.citations,
-            remainingToolRounds = pending.remainingRounds,
-            existingAssistantMessageId = pending.assistantMessageId
-        )
+            executeModelLoop(
+                notebookId = pending.notebookId,
+                conversationId = pending.conversationId,
+                model = model,
+                provider = provider,
+                messagesPayload = nextMessages,
+                citations = pending.citations,
+                remainingToolRounds = pending.remainingRounds,
+                existingAssistantMessageId = pending.assistantMessageId
+            )
+        } catch (ce: CancellationException) {
+            if (_runtimeState.value.isStreaming) {
+                resetStreamingUiAfterCancel()
+            }
+            throw ce
+        } catch (t: Throwable) {
+            activeTurnCitations = emptyList()
+            _runtimeState.value = _runtimeState.value.copy(
+                isStreaming = false,
+                streamingText = "",
+                activeStatusText = "",
+                errorMessage = t.localizedMessage ?: t::class.java.simpleName
+            )
+        }
     }
 
     suspend fun cancelStreamingAndPreservePartial(
@@ -298,10 +314,11 @@ class ChatOrchestrator(
         if (partial.isNotEmpty() && !conversationId.isNullOrBlank()) {
             saveAssistantMessage(
                 conversationId = conversationId,
-                content = "$partial\n\n[Geração interrompida pelo usuário]",
+                content = partial,
                 modelDisplayName = modelDisplayName ?: "Assistente",
                 citations = activeTurnCitations,
                 isError = false,
+                isPartial = true,
                 existingId = null
             )
         }
@@ -329,104 +346,127 @@ class ChatOrchestrator(
             activeStatusText = "Buscando trechos relevantes..."
         )
 
-        val conversation = conversationDao.getConversationById(conversationId) ?: return
-        val fullHistory = conversationDao.getMessagesForConversationOnce(conversationId)
-            .dropLastWhile { it.role == MessageRole.USER.name && it.content == userQuery }
+        try {
+            val conversation = conversationDao.getConversationById(conversationId) ?: return
+            val fullHistory = conversationDao.getMessagesForConversationOnce(conversationId)
+                .dropLastWhile { it.role == MessageRole.USER.name && it.content == userQuery }
 
-        val settings = preferencesStore.settingsFlow.first()
-        val selectedSources = sourceDao.getSelectedReadySources(notebookId)
-        val sourceIds = selectedSources.map { it.id }
+            val settings = preferencesStore.settingsFlow.first()
+            val selectedSources = sourceDao.getSelectedReadySources(notebookId)
+            val sourceIds = selectedSources.map { it.id }
 
-        val chunks = if (sourceIds.isNotEmpty()) {
-            chunkDao.getChunksForSources(sourceIds)
-        } else {
-            emptyList()
-        }
+            val chunks = if (sourceIds.isNotEmpty()) {
+                chunkDao.getChunksForSources(sourceIds)
+            } else {
+                emptyList()
+            }
 
-        // Semantic query embedding with RETRIEVAL_QUERY taskType when Gemini Embedding 2 or custom model is active
-        var queryEmbedding: FloatArray? = null
-        var storedEmbeddings = emptyList<EmbeddingEntity>()
-        var retrievalMode = "Lexical offline (BM25)"
-        val activeSpec = geminiEmbeddingManager.resolveActiveEmbeddingSpec(settings, providerDao)
-        if (activeSpec != null && chunks.isNotEmpty()) {
-            val embModel = activeSpec.model
-            val embProvider = activeSpec.provider
-            val qRes = embeddingProvider.embedTexts(
-                provider = embProvider,
-                model = embModel,
-                texts = listOf(userQuery),
-                taskType = EmbeddingTaskType.QUERY
+            // Semantic query embedding with RETRIEVAL_QUERY taskType when Gemini Embedding 2 or custom model is active
+            var queryEmbedding: FloatArray? = null
+            var storedEmbeddings = emptyList<EmbeddingEntity>()
+            var retrievalMode = "Lexical offline (BM25)"
+            val activeSpec = geminiEmbeddingManager.resolveActiveEmbeddingSpec(settings, providerDao)
+            if (activeSpec != null && chunks.isNotEmpty()) {
+                val embModel = activeSpec.model
+                val embProvider = activeSpec.provider
+                val qRes = embeddingProvider.embedTexts(
+                    provider = embProvider,
+                    model = embModel,
+                    texts = listOf(userQuery),
+                    taskType = EmbeddingTaskType.QUERY
+                )
+                if (qRes.isSuccess) {
+                    val vecResult = qRes.getOrThrow()
+                    queryEmbedding = vecResult.vectors.firstOrNull()
+                    if (vecResult.dimensions > 0) {
+                        storedEmbeddings = chunkDao.getEmbeddingsForSources(
+                            sourceIds = sourceIds,
+                            embeddingModelId = embModel.modelId,
+                            dimensions = vecResult.dimensions
+                        )
+                        retrievalMode = if (storedEmbeddings.isNotEmpty()) {
+                            "Híbrido (Semântico ${embModel.modelId} ${vecResult.dimensions}d + BM25)"
+                        } else {
+                            "Lexical offline (BM25 — reindexe para gerar vetores)"
+                        }
+                    }
+                }
+            }
+            _runtimeState.value = _runtimeState.value.copy(retrievalModeLabel = retrievalMode)
+
+            val passages = retriever.retrieve(
+                query = userQuery,
+                sources = selectedSources,
+                chunks = chunks,
+                embeddings = storedEmbeddings,
+                queryEmbedding = queryEmbedding,
+                topK = settings.ragTopK
             )
-            if (qRes.isSuccess) {
-                val vecResult = qRes.getOrThrow()
-                queryEmbedding = vecResult.vectors.firstOrNull()
-                if (vecResult.dimensions > 0) {
-                    storedEmbeddings = chunkDao.getEmbeddingsForSources(
-                        sourceIds = sourceIds,
-                        embeddingModelId = embModel.modelId,
-                        dimensions = vecResult.dimensions
+
+            val enabledTools = toolDao.getEnabledToolsOnce()
+            val plan = budgetPlanner.buildContextPlan(
+                model = model,
+                conversation = conversation,
+                fullHistory = fullHistory,
+                userQuery = userQuery,
+                retrievedPassages = passages,
+                enabledTools = enabledTools
+            )
+
+            when (plan) {
+                is ContextPlanResult.BudgetExceeded -> {
+                    activeTurnCitations = emptyList()
+                    _runtimeState.value = ChatRuntimeState(
+                        isStreaming = false,
+                        lastBudgetReport = plan.report,
+                        errorMessage = plan.reason
                     )
-                    retrievalMode = if (storedEmbeddings.isNotEmpty()) {
-                        "Híbrido (Semântico ${embModel.modelId} ${vecResult.dimensions}d + BM25)"
-                    } else {
-                        "Lexical offline (BM25 — reindexe para gerar vetores)"
+                    return
+                }
+                is ContextPlanResult.Ready -> {
+                    activeTurnCitations = plan.citations
+                    _runtimeState.value = _runtimeState.value.copy(
+                        lastBudgetReport = plan.report,
+                        activeStatusText = "Conectando a ${provider.name}..."
+                    )
+
+                    if (plan.report.needsProgressiveSummary) {
+                        runCatching {
+                            updateProgressiveSummary(conversation, fullHistory, plan.report.includedHistoryCount, model, provider)
+                        }
                     }
+
+                    executeModelLoop(
+                        notebookId = notebookId,
+                        conversationId = conversationId,
+                        model = model,
+                        provider = provider,
+                        messagesPayload = plan.messages,
+                        citations = plan.citations,
+                        remainingToolRounds = 4,
+                        existingAssistantMessageId = null
+                    )
                 }
             }
-        }
-        _runtimeState.value = _runtimeState.value.copy(retrievalModeLabel = retrievalMode)
-
-        val passages = retriever.retrieve(
-            query = userQuery,
-            sources = selectedSources,
-            chunks = chunks,
-            embeddings = storedEmbeddings,
-            queryEmbedding = queryEmbedding,
-            topK = settings.ragTopK
-        )
-
-        val enabledTools = toolDao.getEnabledToolsOnce()
-        val plan = budgetPlanner.buildContextPlan(
-            model = model,
-            conversation = conversation,
-            fullHistory = fullHistory,
-            userQuery = userQuery,
-            retrievedPassages = passages,
-            enabledTools = enabledTools
-        )
-
-        when (plan) {
-            is ContextPlanResult.BudgetExceeded -> {
-                activeTurnCitations = emptyList()
-                _runtimeState.value = ChatRuntimeState(
-                    isStreaming = false,
-                    lastBudgetReport = plan.report,
-                    errorMessage = plan.reason
-                )
-                return
+        } catch (ce: CancellationException) {
+            if (_runtimeState.value.isStreaming) {
+                resetStreamingUiAfterCancel()
             }
-            is ContextPlanResult.Ready -> {
-                activeTurnCitations = plan.citations
+            throw ce
+        } catch (t: Throwable) {
+            activeTurnCitations = emptyList()
+            _runtimeState.value = _runtimeState.value.copy(
+                isStreaming = false,
+                streamingText = "",
+                activeStatusText = "",
+                errorMessage = t.localizedMessage ?: t::class.java.simpleName
+            )
+        } finally {
+            if (_runtimeState.value.isStreaming) {
                 _runtimeState.value = _runtimeState.value.copy(
-                    lastBudgetReport = plan.report,
-                    activeStatusText = "Conectando a ${provider.name}..."
-                )
-
-                if (plan.report.needsProgressiveSummary) {
-                    runCatching {
-                        updateProgressiveSummary(conversation, fullHistory, plan.report.includedHistoryCount, model, provider)
-                    }
-                }
-
-                executeModelLoop(
-                    notebookId = notebookId,
-                    conversationId = conversationId,
-                    model = model,
-                    provider = provider,
-                    messagesPayload = plan.messages,
-                    citations = plan.citations,
-                    remainingToolRounds = 4,
-                    existingAssistantMessageId = null
+                    isStreaming = false,
+                    streamingText = "",
+                    activeStatusText = ""
                 )
             }
         }
@@ -495,10 +535,11 @@ class ChatOrchestrator(
             if (partial.isNotEmpty()) {
                 saveAssistantMessage(
                     conversationId = conversationId,
-                    content = "$partial\n\n[Interrompido: $streamError]",
+                    content = partial,
                     modelDisplayName = model.displayName,
                     citations = citations,
-                    isError = true,
+                    isError = false,
+                    isPartial = true,
                     existingId = existingAssistantMessageId
                 )
             }
@@ -613,6 +654,7 @@ class ChatOrchestrator(
         modelDisplayName: String,
         citations: List<CitationEntity>,
         isError: Boolean,
+        isPartial: Boolean = false,
         existingId: String?
     ) {
         val msgId = existingId ?: UUID.randomUUID().toString()
@@ -628,6 +670,7 @@ class ChatOrchestrator(
                 tokenCountEstimate = TokenEstimator.estimateTokens(content),
                 contextTokensUsed = usedContext,
                 isError = isError,
+                isPartial = isPartial,
                 orderIndex = nextOrder
             )
         )
@@ -704,7 +747,10 @@ class ChatOrchestrator(
             return Result.failure(IllegalStateException("Adicione e selecione pelo menos uma fonte processada."))
         }
         val chunks = chunkDao.getChunksForSources(sources.map { it.id })
-        val budgetChars = ((model.contextWindow - model.maxOutputTokens - 512).coerceAtLeast(1000) * 3)
+        val budgetChars = com.sjos.folionote.engine.ai.ModelLimitsValidator.computeStudioBudgetChars(
+            contextWindow = model.contextWindow,
+            maxOutputTokens = model.maxOutputTokens
+        )
         val contextJoined = buildString {
             for (chunk in chunks) {
                 val next = "[${sources.firstOrNull { it.id == chunk.sourceId }?.name ?: "Fonte"} • p.${chunk.pageNumber}]\n${chunk.content}\n\n"

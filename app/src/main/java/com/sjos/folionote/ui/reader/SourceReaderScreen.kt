@@ -25,15 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
-import androidx.compose.material.icons.outlined.CloudQueue
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -63,6 +54,7 @@ import coil.compose.AsyncImage
 import com.sjos.folionote.data.local.SourceStatus
 import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.ui.components.FormatUtils
+import com.sjos.folionote.ui.theme.FolioIcons
 import com.sjos.folionote.ui.theme.JetBrainsMonoFontFamily
 import org.json.JSONObject
 import java.io.File
@@ -140,7 +132,7 @@ fun SourceReaderScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
+                        Icon(FolioIcons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -156,10 +148,10 @@ fun SourceReaderScreen(
                         )
                     }
                     IconButton(onClick = { showSearch = !showSearch }) {
-                        Icon(Icons.Rounded.Search, contentDescription = "Buscar no documento")
+                        Icon(FolioIcons.Rounded.Search, contentDescription = "Buscar no documento")
                     }
                     IconButton(onClick = { showMetadata = true }) {
-                        Icon(Icons.Outlined.Info, contentDescription = "Metadados da fonte")
+                        Icon(FolioIcons.Outlined.Info, contentDescription = "Metadados da fonte")
                     }
                 }
 
@@ -171,7 +163,7 @@ fun SourceReaderScreen(
                         trailingIcon = {
                             if (state.searchQuery.isNotBlank()) {
                                 IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                    Icon(Icons.Rounded.Close, "Limpar")
+                                    Icon(FolioIcons.Rounded.Close, "Limpar")
                                 }
                             }
                         },
@@ -223,7 +215,7 @@ fun SourceReaderScreen(
                                     modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Icon(FolioIcons.Rounded.WarningAmber, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = src.errorMessage,
@@ -276,7 +268,7 @@ fun SourceReaderScreen(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Outlined.Language, null, tint = MaterialTheme.colorScheme.primary)
+                                        Icon(FolioIcons.Outlined.Language, null, tint = MaterialTheme.colorScheme.primary)
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             text = domain.ifBlank { "Página Web capturada" },
@@ -306,7 +298,7 @@ fun SourceReaderScreen(
                                             },
                                             shape = CircleShape
                                         ) {
-                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Abrir URL externa")
                                         }
@@ -365,7 +357,7 @@ fun SourceReaderScreen(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Outlined.CloudQueue, null, tint = MaterialTheme.colorScheme.primary)
+                                        Icon(FolioIcons.Outlined.CloudQueue, null, tint = MaterialTheme.colorScheme.primary)
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             text = "Origem: Google Drive",
@@ -397,7 +389,7 @@ fun SourceReaderScreen(
                                             },
                                             shape = CircleShape
                                         ) {
-                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
+                                            Icon(FolioIcons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
                                             Text("Abrir no Google Drive")
                                         }

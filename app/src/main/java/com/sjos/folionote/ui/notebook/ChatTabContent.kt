@@ -22,22 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DataUsage
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.SmartToy
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -74,6 +58,7 @@ import com.sjos.folionote.data.local.MessageEntity
 import com.sjos.folionote.data.local.MessageRole
 import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.ui.components.MarkdownLiteText
+import com.sjos.folionote.ui.theme.FolioIcons
 import com.sjos.folionote.ui.theme.JetBrainsMonoFontFamily
 import com.sjos.folionote.ui.theme.NotebookIcons
 
@@ -134,7 +119,7 @@ fun ChatTabContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        Icons.Rounded.SmartToy,
+                        FolioIcons.Rounded.SmartToy,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(16.dp)
@@ -151,7 +136,7 @@ fun ChatTabContent(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(FolioIcons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
             }
 
@@ -169,7 +154,7 @@ fun ChatTabContent(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.DataUsage, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(FolioIcons.Rounded.DataUsage, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
                         val r = state.chatRuntime.lastBudgetReport
                         Text(
@@ -194,7 +179,7 @@ fun ChatTabContent(
                     modifier = Modifier.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.Security, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.Rounded.Security, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Ao conversar, apenas os trechos recuperados e o histórico do orçamento são enviados ao provedor selecionado.",
@@ -213,19 +198,61 @@ fun ChatTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("chat_error_banner")
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 6.dp, bottom = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Text(
-                        text = state.chatRuntime.errorMessage.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = onDismissError, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Fechar erro", tint = MaterialTheme.colorScheme.onErrorContainer)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = state.chatRuntime.errorMessage.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onDismissError,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("chat_dismiss_error_button")
+                        ) {
+                            Icon(
+                                FolioIcons.Rounded.Close,
+                                contentDescription = "Fechar erro",
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                onDismissError()
+                                onRegenerate()
+                            },
+                            enabled = !state.chatRuntime.isStreaming && state.selectedModel != null,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("chat_retry_button")
+                        ) {
+                            Icon(
+                                imageVector = FolioIcons.Rounded.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Tentar novamente",
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                     }
                 }
             }
@@ -366,7 +393,7 @@ fun ChatTabContent(
                         modifier = Modifier.testTag("chat_config_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Tune,
+                            imageVector = FolioIcons.Rounded.Tune,
                             contentDescription = "Configurar conversas",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -402,7 +429,7 @@ fun ChatTabContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Description,
+                            imageVector = FolioIcons.Outlined.Description,
                             contentDescription = "Fontes selecionadas",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
@@ -438,7 +465,7 @@ fun ChatTabContent(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (isStreaming) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+                                imageVector = if (isStreaming) FolioIcons.Rounded.Stop else FolioIcons.Rounded.ArrowUpward,
                                 contentDescription = if (isStreaming) "Interromper geração" else "Enviar mensagem",
                                 tint = if (isStreaming || canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
@@ -562,7 +589,7 @@ fun ChatTabContent(
                 ) {
                     Text("Abrir na fonte")
                     Spacer(Modifier.width(6.dp))
-                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(18.dp))
+                    Icon(FolioIcons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(18.dp))
                 }
                 Spacer(Modifier.height(20.dp))
             }
@@ -595,7 +622,7 @@ private fun ModelPickerRow(
             )
         }
         if (isSelected) {
-            Icon(Icons.Rounded.Check, contentDescription = "Selecionado", tint = MaterialTheme.colorScheme.primary)
+            Icon(FolioIcons.Rounded.Check, contentDescription = "Selecionado", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -612,13 +639,36 @@ private fun AssistantMessageBlock(
     onRegenerateClick: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        if (!message.modelDisplayName.isNullOrBlank()) {
-            Text(
-                text = message.modelDisplayName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
+        if (!message.modelDisplayName.isNullOrBlank() || message.isPartial) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!message.modelDisplayName.isNullOrBlank()) {
+                    Text(
+                        text = message.modelDisplayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                if (message.isPartial) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = CircleShape,
+                        modifier = Modifier.testTag("partial_response_badge")
+                    ) {
+                        Text(
+                            text = "Resposta parcial",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
 
         MarkdownLiteText(text = message.content)
@@ -650,7 +700,7 @@ private fun AssistantMessageBlock(
         ) {
             IconButton(onClick = onPinClick, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    imageVector = if (message.isPinned) Icons.Rounded.PushPin else Icons.Outlined.PushPin,
+                    imageVector = if (message.isPinned) FolioIcons.Rounded.PushPin else FolioIcons.Outlined.PushPin,
                     contentDescription = "Fixar como nota",
                     tint = if (message.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
@@ -658,7 +708,7 @@ private fun AssistantMessageBlock(
             }
             IconButton(onClick = onCopyClick, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    imageVector = Icons.Outlined.ContentCopy,
+                    imageVector = FolioIcons.Outlined.ContentCopy,
                     contentDescription = "Copiar resposta",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
@@ -667,7 +717,7 @@ private fun AssistantMessageBlock(
             if (showRegenerate) {
                 IconButton(onClick = onRegenerateClick, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        imageVector = Icons.Rounded.Refresh,
+                        imageVector = FolioIcons.Rounded.Refresh,
                         contentDescription = "Regenerar resposta",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)

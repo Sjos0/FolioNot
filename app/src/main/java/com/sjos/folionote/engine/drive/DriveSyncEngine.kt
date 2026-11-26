@@ -1339,6 +1339,7 @@ class DriveSyncEngine(
         put("contextTokensUsed", m.contextTokensUsed)
         put("isPinned", m.isPinned)
         put("isError", m.isError)
+        put("isPartial", m.isPartial)
         put("orderIndex", m.orderIndex)
         put("createdAt", m.createdAt)
     }
@@ -1355,6 +1356,7 @@ class DriveSyncEngine(
         contextTokensUsed = o.optInt("contextTokensUsed", 0),
         isPinned = o.optBoolean("isPinned", false),
         isError = o.optBoolean("isError", false),
+        isPartial = o.optBoolean("isPartial", false),
         orderIndex = o.optInt("orderIndex", 0),
         createdAt = o.optLong("createdAt", System.currentTimeMillis())
     )

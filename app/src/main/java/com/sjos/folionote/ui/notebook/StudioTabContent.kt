@@ -15,17 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AccountTree
-import androidx.compose.material.icons.outlined.Article
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.FindInPage
-import androidx.compose.material.icons.outlined.Quiz
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,6 +50,7 @@ import com.sjos.folionote.ui.theme.AccentEmerald
 import com.sjos.folionote.ui.theme.AccentPink
 import com.sjos.folionote.ui.theme.AccentPurple
 import com.sjos.folionote.ui.theme.AccentTeal
+import com.sjos.folionote.ui.theme.FolioIcons
 
 private data class StudioToolTile(
     val type: String,
@@ -90,54 +80,54 @@ fun StudioTabContent(
             StudioToolTile(
                 type = "SUMMARY",
                 title = "Resumo Estruturado",
-                icon = Icons.Outlined.AutoAwesome,
+                icon = FolioIcons.Outlined.AutoAwesome,
                 tint = AccentBlue,
                 prompt = "Crie um resumo executivo estruturado por tópicos cobrindo todas as ideias centrais e evidências das fontes."
             ),
             StudioToolTile(
                 type = "STUDY_GUIDE",
                 title = "Guia de Estudo",
-                icon = Icons.Outlined.Article,
+                icon = FolioIcons.Outlined.Article,
                 tint = AccentPink,
                 prompt = "Elabore um guia de estudo completo com conceitos-chave, glossário e questões dissertativas de revisão."
             ),
             StudioToolTile(
                 type = "TOPIC_MAP",
                 title = "Mapa de Tópicos",
-                icon = Icons.Outlined.AccountTree,
+                icon = FolioIcons.Outlined.AccountTree,
                 tint = AccentPurple,
                 prompt = "Organize os assuntos das fontes em uma árvore hierárquica de tópicos, subtópicos e relações entre conceitos."
             ),
             StudioToolTile(
                 type = "FLASHCARDS",
                 title = "Cartões Didáticos",
-                icon = Icons.Outlined.Style,
+                icon = FolioIcons.Outlined.Style,
                 tint = AccentAmber,
                 prompt = "Crie 8 cartões didáticos (Frente: Pergunta / Verso: Resposta concisa) baseados exclusivamente nas fontes."
             ),
             StudioToolTile(
                 type = "QUIZ",
                 title = "Teste / Quiz",
-                icon = Icons.Outlined.Quiz,
+                icon = FolioIcons.Outlined.Quiz,
                 tint = AccentTeal,
                 prompt = "Elabore um teste com 5 questões de múltipla escolha baseadas nas fontes, com gabarito comentado ao final."
             ),
             StudioToolTile(
                 type = "LEXICAL_SEARCH",
                 title = "Busca Lexical",
-                icon = Icons.Outlined.FindInPage,
+                icon = FolioIcons.Outlined.FindInPage,
                 tint = AccentEmerald
             ),
             StudioToolTile(
                 type = "INDEX_INSPECTOR",
                 title = "Inspetor de Índice",
-                icon = Icons.Outlined.Storage,
+                icon = FolioIcons.Outlined.Storage,
                 tint = AccentCyan
             ),
             StudioToolTile(
                 type = "REINDEX",
                 title = "Reindexar Fontes",
-                icon = Icons.Outlined.Refresh,
+                icon = FolioIcons.Outlined.Refresh,
                 tint = AccentAmber
             )
         )
@@ -223,7 +213,7 @@ fun StudioTabContent(
                         modifier = Modifier.padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Outlined.Article, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                        Icon(FolioIcons.Outlined.Article, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(artifact.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -234,7 +224,7 @@ fun StudioTabContent(
                             )
                         }
                         IconButton(onClick = { onDeleteArtifact(artifact.id) }) {
-                            Icon(Icons.Outlined.DeleteOutline, contentDescription = "Excluir nota")
+                            Icon(FolioIcons.Outlined.DeleteOutline, contentDescription = "Excluir nota")
                         }
                     }
                 }
@@ -363,7 +353,7 @@ fun StudioTabContent(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(art.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     IconButton(onClick = { clipboard.setText(AnnotatedString(art.content)) }) {
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copiar")
+                        Icon(FolioIcons.Outlined.ContentCopy, contentDescription = "Copiar")
                     }
                 }
                 Spacer(Modifier.height(8.dp))

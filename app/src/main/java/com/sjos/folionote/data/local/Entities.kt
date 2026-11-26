@@ -274,6 +274,7 @@ data class MessageEntity(
     val contextTokensUsed: Int = 0,
     val isPinned: Boolean = false,
     val isError: Boolean = false,
+    val isPartial: Boolean = false,
     val orderIndex: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )

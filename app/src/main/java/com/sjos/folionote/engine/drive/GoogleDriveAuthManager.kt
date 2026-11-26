@@ -26,6 +26,8 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.sjos.folionote.R
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.core.security.KeystoreCryptoManager
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +40,6 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
 import java.security.SecureRandom
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -324,7 +325,7 @@ class GoogleDriveAuthManager(
     private val context: Context,
     private val preferencesStore: AppPreferencesStore,
     private val cryptoManager: KeystoreCryptoManager,
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val oauthBaseUrl: String = "https://oauth2.googleapis.com",
     private val userInfoUrl: String = "https://www.googleapis.com/oauth2/v3/userinfo",
     private val credentialAuthenticator: GoogleCredentialAuthenticator = CredentialManagerGoogleAuthenticator(context),
@@ -584,12 +585,10 @@ class GoogleDriveAuthManager(
                     .build()
                 val req = Request.Builder()
                     .url("${oauthBaseUrl.trimEnd('/')}/revoke")
+                    .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 15))
                     .post(body)
                     .build()
-                baseHttpClient.newBuilder()
-                    .readTimeout(15, TimeUnit.SECONDS)
-                    .build()
-                    .newCall(req)
+                baseHttpClient.newCall(req)
                     .execute()
                     .close()
             }
@@ -606,16 +605,14 @@ class GoogleDriveAuthManager(
     }
 
     private fun fetchUserProfile(accessToken: String): GoogleAccountProfile {
-        val client = baseHttpClient.newBuilder()
-            .readTimeout(20, TimeUnit.SECONDS)
-            .build()
         val req = Request.Builder()
             .url(userInfoUrl)
+            .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 20))
             .header("Authorization", "Bearer $accessToken")
             .get()
             .build()
 
-        return client.newCall(req).execute().use { resp ->
+        return baseHttpClient.newCall(req).execute().use { resp ->
             val raw = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
                 throw IllegalStateException("Erro ao obter perfil Google (HTTP ${resp.code}): ${extractOAuthError(raw)}")

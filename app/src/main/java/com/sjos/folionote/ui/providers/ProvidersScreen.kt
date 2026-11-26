@@ -20,17 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.NetworkCheck
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -66,6 +55,7 @@ import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ProviderEntity
 import com.sjos.folionote.data.local.ProviderType
 import com.sjos.folionote.data.local.ToolDefinitionEntity
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @Composable
 fun ProvidersScreen(
@@ -112,7 +102,7 @@ fun ProvidersScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
+                        Icon(FolioIcons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")
                     }
                     Text(
                         text = "Provedores e Modelos",
@@ -132,7 +122,7 @@ fun ProvidersScreen(
                         shape = CircleShape,
                         modifier = Modifier.testTag("add_provider_or_model_button")
                     ) {
-                        Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
+                        Icon(FolioIcons.Rounded.Add, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(if (selectedTab == 1) "Modelo" else "Provedor")
                     }
@@ -321,22 +311,22 @@ private fun ProvidersListTab(
                             Switch(checked = provider.isEnabled, onCheckedChange = { onToggleEnabled(provider) })
                             Box {
                                 IconButton(onClick = { menuOpen = true }) {
-                                    Icon(Icons.Rounded.MoreVert, contentDescription = "Ações do provedor")
+                                    Icon(FolioIcons.Rounded.MoreVert, contentDescription = "Ações do provedor")
                                 }
                                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                     DropdownMenuItem(
                                         text = { Text("Editar") },
-                                        leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                                        leadingIcon = { Icon(FolioIcons.Rounded.Edit, null) },
                                         onClick = { menuOpen = false; onEdit(provider) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Duplicar") },
-                                        leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
+                                        leadingIcon = { Icon(FolioIcons.Rounded.ContentCopy, null) },
                                         onClick = { menuOpen = false; onDuplicate(provider) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Excluir", color = MaterialTheme.colorScheme.error) },
-                                        leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                                         onClick = { menuOpen = false; onDelete(provider) }
                                     )
                                 }
@@ -346,7 +336,7 @@ private fun ProvidersListTab(
                         if (testRes != null) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = if (testRes.success) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                                    imageVector = if (testRes.success) FolioIcons.Rounded.CheckCircle else FolioIcons.Rounded.ErrorOutline,
                                     contentDescription = null,
                                     tint = if (testRes.success) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(16.dp)
@@ -370,7 +360,7 @@ private fun ProvidersListTab(
                                 if (isTesting) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                 } else {
-                                    Icon(Icons.Rounded.NetworkCheck, null, modifier = Modifier.size(16.dp))
+                                    Icon(FolioIcons.Rounded.NetworkCheck, null, modifier = Modifier.size(16.dp))
                                 }
                                 Spacer(Modifier.width(6.dp))
                                 Text("Testar conexão", maxLines = 1)
@@ -380,7 +370,7 @@ private fun ProvidersListTab(
                                 shape = CircleShape,
                                 modifier = Modifier.weight(1f).testTag("fetch_models_${provider.id}")
                             ) {
-                                Icon(Icons.Rounded.Search, null, modifier = Modifier.size(16.dp))
+                                Icon(FolioIcons.Rounded.Search, null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Buscar modelos", maxLines = 1)
                             }
@@ -464,7 +454,7 @@ private fun ModelsLibraryTab(
                         }
                         Switch(checked = model.enabled, onCheckedChange = { onToggleEnabled(model) })
                         IconButton(onClick = { onDeleteModel(model) }) {
-                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Remover modelo")
+                            Icon(FolioIcons.Rounded.DeleteOutline, contentDescription = "Remover modelo")
                         }
                     }
                 }

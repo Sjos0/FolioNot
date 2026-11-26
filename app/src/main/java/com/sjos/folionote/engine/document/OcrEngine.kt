@@ -12,6 +12,8 @@ import com.google.android.gms.tasks.Task
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.core.preferences.AppSettings
 import com.sjos.folionote.core.preferences.OcrProviderType
@@ -32,7 +34,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
@@ -414,7 +415,7 @@ class MlKitLocalOcrEngine(
 class ConfigurableExternalOcrEngine(
     private val preferencesStore: AppPreferencesStore,
     private val cryptoManager: KeystoreCryptoManager,
-    private val baseHttpClient: OkHttpClient = OkHttpClient(),
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient,
     private val pageRenderer: PdfPageRenderer = AndroidPdfPageRenderer()
 ) : OcrEngine {
 
@@ -522,11 +523,9 @@ class ConfigurableExternalOcrEngine(
         val endpoint = settings.ocrEndpointUrl.trim()
         require(endpoint.isNotBlank()) { "Endpoint OCR em branco." }
 
-        val client = baseHttpClient.newBuilder()
-            .readTimeout(60, TimeUnit.SECONDS)
-            .build()
-
-        val reqBuilder = Request.Builder().url(endpoint)
+        val reqBuilder = Request.Builder()
+            .url(endpoint)
+            .tag(RequestTimeoutSpec::class.java, RequestTimeoutSpec(readTimeoutSeconds = 60))
         val bodyJson: JSONObject = when (settings.ocrProviderType) {
             OcrProviderType.ML_KIT_LOCAL -> {
                 throw IllegalStateException("OCR local não utiliza chamadas HTTP.")
@@ -595,7 +594,7 @@ class ConfigurableExternalOcrEngine(
             .post(bodyJson.toString().toRequestBody(jsonMediaType))
             .build()
 
-        client.newCall(request).execute().use { response ->
+        baseHttpClient.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw IllegalStateException("OCR HTTP ${response.code}: ${raw.take(220)}")

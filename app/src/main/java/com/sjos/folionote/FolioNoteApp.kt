@@ -1,6 +1,7 @@
 package com.sjos.folionote
 
 import android.app.Application
+import com.sjos.folionote.core.network.SharedHttpClients
 import com.sjos.folionote.core.preferences.AppPreferencesStore
 import com.sjos.folionote.core.security.KeystoreCryptoManager
 import com.sjos.folionote.data.local.FolioNoteDatabase
@@ -40,7 +41,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 
 class AppContainer(app: Application) {
     val appContext: android.content.Context = app
@@ -48,20 +48,8 @@ class AppContainer(app: Application) {
     val preferencesStore: AppPreferencesStore = AppPreferencesStore(app)
     val cryptoManager: KeystoreCryptoManager = KeystoreCryptoManager()
 
-    private val okHttpClient: OkHttpClient by lazy {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-            redactHeader("Authorization")
-            redactHeader("x-api-key")
-            redactHeader("api-key")
-            redactHeader("x-goog-api-key")
-            redactHeader("X-Goog-Api-Key")
-            redactHeader("proxy-authorization")
-        }
-        OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .build()
-    }
+    val okHttpClient: OkHttpClient
+        get() = SharedHttpClients.defaultClient
 
     val fileStorageManager = FileStorageManager(app)
     val webClipperEngine = WebClipperEngine(okHttpClient)

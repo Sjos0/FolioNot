@@ -21,10 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -43,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +56,7 @@ import com.sjos.folionote.data.local.ModelEntity
 import com.sjos.folionote.data.local.ProviderEntity
 import com.sjos.folionote.data.local.ProviderType
 import com.sjos.folionote.engine.ai.ProviderPresets
+import com.sjos.folionote.ui.theme.FolioIcons
 import com.sjos.folionote.ui.theme.JetBrainsMonoFontFamily
 import java.util.UUID
 
@@ -106,7 +104,8 @@ fun ProviderEditorSheet(
     var providerType by remember(initial) { mutableStateOf(initial?.providerType ?: ProviderType.OPENAI_COMPATIBLE.name) }
     var isEnabled by remember(initial) { mutableStateOf(initial?.isEnabled ?: true) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -121,7 +120,7 @@ fun ProviderEditorSheet(
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Fechar")
+                    Icon(FolioIcons.Rounded.Close, contentDescription = "Fechar")
                 }
             }
 
@@ -171,7 +170,7 @@ fun ProviderEditorSheet(
                         },
                         label = { Text(label) },
                         leadingIcon = if (selected) {
-                            { Icon(Icons.Rounded.Check, null, Modifier.size(16.dp)) }
+                            { Icon(FolioIcons.Rounded.Check, null, Modifier.size(16.dp)) }
                         } else null
                     )
                 }
@@ -382,8 +381,12 @@ fun ModelEditorSheet(
     var embDimsText by remember(initial) { mutableStateOf(initial?.embeddingDimensions?.toString() ?: "") }
     var customParamsJson by remember(initial) { mutableStateOf(initial?.customParamsJson ?: "{}") }
     var notes by remember(initial) { mutableStateOf(initial?.notes ?: "") }
+    val limitsValidation = remember(contextWindowText, maxOutputText) {
+        com.sjos.folionote.engine.ai.ModelLimitsValidator.validate(contextWindowText, maxOutputText)
+    }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -397,7 +400,7 @@ fun ModelEditorSheet(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "Fechar") }
+                IconButton(onClick = onDismiss) { Icon(FolioIcons.Rounded.Close, "Fechar") }
             }
 
             if (providers.isNotEmpty()) {
@@ -434,16 +437,39 @@ fun ModelEditorSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = contextWindowText,
-                    onValueChange = { contextWindowText = it.filter { ch -> ch.isDigit() } },
+                    onValueChange = { contextWindowText = it },
                     label = { Text("Context window") },
+                    isError = limitsValidation.contextWindowError != null,
+                    supportingText = {
+                        Text(
+                            text = limitsValidation.contextWindowError ?: "512 – 2.000.000 tokens",
+                            modifier = if (limitsValidation.contextWindowError != null) {
+                                Modifier.testTag("model_context_error")
+                            } else {
+                                Modifier
+                            }
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.weight(1f).testTag("model_context_input")
                 )
                 OutlinedTextField(
                     value = maxOutputText,
-                    onValueChange = { maxOutputText = it.filter { ch -> ch.isDigit() } },
+                    onValueChange = { maxOutputText = it },
                     label = { Text("Max output tokens") },
+                    isError = limitsValidation.maxOutputTokensError != null,
+                    supportingText = {
+                        Text(
+                            text = limitsValidation.maxOutputTokensError
+                                ?: "64 – ${limitsValidation.contextWindow ?: "ctx"} tokens",
+                            modifier = if (limitsValidation.maxOutputTokensError != null) {
+                                Modifier.testTag("model_max_output_error")
+                            } else {
+                                Modifier
+                            }
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.weight(1f).testTag("model_max_output_input")
@@ -539,8 +565,8 @@ fun ModelEditorSheet(
 
             Button(
                 onClick = {
-                    val ctxWin = (contextWindowText.toIntOrNull() ?: 8192).coerceAtLeast(512)
-                    val maxOut = (maxOutputText.toIntOrNull() ?: 2048).coerceIn(64, ctxWin)
+                    val ctxWin = limitsValidation.contextWindow ?: return@Button
+                    val maxOut = limitsValidation.maxOutputTokens ?: return@Button
                     val model = ModelEntity(
                         id = initial?.id ?: UUID.randomUUID().toString(),
                         providerId = selectedProviderId,
@@ -565,7 +591,7 @@ fun ModelEditorSheet(
                     onSave(model)
                     onDismiss()
                 },
-                enabled = modelId.isNotBlank() && selectedProviderId.isNotBlank(),
+                enabled = modelId.isNotBlank() && selectedProviderId.isNotBlank() && limitsValidation.isValid,
                 shape = CircleShape,
                 modifier = Modifier.fillMaxWidth().testTag("save_model_button")
             ) {
@@ -604,7 +630,7 @@ fun ModelDiscoveryDialog(
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onRefresh, enabled = !state.isLoading) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Atualizar lista")
+                    Icon(FolioIcons.Rounded.Refresh, contentDescription = "Atualizar lista")
                 }
             }
         },

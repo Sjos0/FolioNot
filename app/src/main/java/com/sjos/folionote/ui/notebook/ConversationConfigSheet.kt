@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -36,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.sjos.folionote.data.local.ConversationEntity
 import com.sjos.folionote.data.local.ConversationGoalPreset
 import com.sjos.folionote.data.local.ResponseLengthPreset
+import com.sjos.folionote.ui.theme.FolioIcons
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -62,7 +60,7 @@ fun ConversationConfigSheet(
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Fechar")
+                    Icon(FolioIcons.Rounded.Close, contentDescription = "Fechar")
                 }
             }
 
@@ -94,7 +92,7 @@ fun ConversationConfigSheet(
                         onClick = { selectedGoal = key },
                         label = { Text(label) },
                         leadingIcon = if (active) {
-                            { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
+                            { Icon(FolioIcons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
                         } else null,
                         shape = CircleShape,
                         colors = FilterChipDefaults.filterChipColors(
@@ -138,7 +136,7 @@ fun ConversationConfigSheet(
                         onClick = { selectedLength = key },
                         label = { Text(label) },
                         leadingIcon = if (active) {
-                            { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
+                            { Icon(FolioIcons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
                         } else null,
                         shape = CircleShape,
                         colors = FilterChipDefaults.filterChipColors(

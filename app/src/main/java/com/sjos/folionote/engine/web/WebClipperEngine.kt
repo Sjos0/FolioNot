@@ -1,12 +1,13 @@
 package com.sjos.folionote.engine.web
 
+import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.SharedHttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 data class ClippedWebPage(
@@ -21,7 +22,7 @@ data class ClippedWebPage(
 )
 
 class WebClipperEngine(
-    private val baseHttpClient: OkHttpClient = OkHttpClient()
+    private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient
 ) {
 
     companion object {
@@ -59,15 +60,12 @@ class WebClipperEngine(
 
     suspend fun clipUrl(rawUrl: String): Result<ClippedWebPage> = withContext(Dispatchers.IO) {
         val parsedUrl = validateUrl(rawUrl).getOrElse { return@withContext Result.failure(it) }
-        val client = baseHttpClient.newBuilder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .build()
-
         val request = Request.Builder()
             .url(parsedUrl)
+            .tag(
+                RequestTimeoutSpec::class.java,
+                RequestTimeoutSpec(connectTimeoutSeconds = 20, readTimeoutSeconds = 25)
+            )
             .header("User-Agent", READER_USER_AGENT)
             .header("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
             .header("Accept-Language", "pt-BR,pt;q=0.9,en;q=0.8")
@@ -75,7 +73,7 @@ class WebClipperEngine(
             .build()
 
         runCatching {
-            client.newCall(request).execute().use { response ->
+            baseHttpClient.newCall(request).execute().use { response ->
                 when (response.code) {
                     401, 402, 403 -> throw IllegalStateException(
                         "Acesso negado ou conteúdo protegido por paywall/login (HTTP ${response.code})."
