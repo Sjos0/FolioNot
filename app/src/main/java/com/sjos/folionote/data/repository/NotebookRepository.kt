@@ -59,6 +59,9 @@ class NotebookRepository(
     fun observeChunksForSource(sourceId: String): Flow<List<DocumentChunkEntity>> = chunkDao.observeChunksForSource(sourceId)
     fun observeChunksForNotebook(notebookId: String): Flow<List<DocumentChunkEntity>> = chunkDao.observeChunksForNotebook(notebookId)
     fun observeEmbeddingsForNotebook(notebookId: String) = chunkDao.observeEmbeddingsForNotebook(notebookId)
+    fun observeChunkStats(notebookId: String) = chunkDao.observeChunkStats(notebookId)
+    fun observeChunkCountsBySource(notebookId: String) = chunkDao.observeChunkCountsBySource(notebookId)
+    fun observeEmbeddingGroups(notebookId: String) = chunkDao.observeEmbeddingGroups(notebookId)
     fun observeProcessingJobs(notebookId: String) = db.toolAndJobDao().observeJobsForNotebook(notebookId)
     fun observeStudioArtifacts(notebookId: String): Flow<List<StudioArtifactEntity>> =
         conversationDao.observeStudioArtifacts(notebookId)
@@ -296,6 +299,10 @@ class NotebookRepository(
 
     suspend fun setAllSourcesSelected(notebookId: String, selected: Boolean) {
         sourceDao.setAllSourcesSelected(notebookId, selected)
+    }
+
+    suspend fun setSourcesSelected(sourceIds: List<String>, selected: Boolean) {
+        sourceDao.setSourcesSelected(sourceIds, selected)
     }
 
     suspend fun deleteSource(source: SourceEntity) {

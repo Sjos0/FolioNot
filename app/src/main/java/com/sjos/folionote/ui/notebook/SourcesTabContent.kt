@@ -81,7 +81,7 @@ fun SourcesTabContent(
     var showCreateNoteDialog by remember { mutableStateOf(false) }
     var showWebUrlDialog by remember { mutableStateOf(false) }
 
-    val allSelected = state.sources.isNotEmpty() && state.sources.all { it.isSelectedForChat }
+    val allSelected = state.visibleSources.isNotEmpty() && state.visibleSources.all { it.isSelectedForChat }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -263,7 +263,7 @@ fun SourcesTabContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Selecionar tudo (${state.sources.count { it.isSelectedForChat }}/${state.sources.size})",
+                        text = "Selecionar tudo (${state.visibleSources.count { it.isSelectedForChat }}/${state.visibleSources.size})",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
@@ -309,10 +309,18 @@ fun SourcesTabContent(
                 }
             }
         } else {
-            items(state.sources, key = { it.id }) { source ->
-                val chunkCount = remember(state.chunks, source.id) {
-                    state.chunks.count { it.sourceId == source.id }
+            if (state.sources.isNotEmpty() && state.visibleSources.isEmpty()) {
+                item {
+                    Text(
+                        text = "Nenhuma fonte corresponde à busca.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                 }
+            }
+            items(state.visibleSources, key = { it.id }) { source ->
+                val chunkCount = state.chunkCountsBySource[source.id] ?: 0
                 SourceRowItem(
                     source = source,
                     chunkCount = chunkCount,

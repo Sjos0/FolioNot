@@ -493,6 +493,7 @@ fun ChatTabContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

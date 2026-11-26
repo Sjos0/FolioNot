@@ -14,6 +14,7 @@ import com.sjos.folionote.data.local.FolioNoteDatabase
 import com.sjos.folionote.data.local.JobStatus
 import com.sjos.folionote.data.local.ProcessingJobEntity
 import com.sjos.folionote.data.local.SourceStatus
+import com.sjos.folionote.data.local.SourceEntity
 import com.sjos.folionote.data.local.SourceType
 import com.sjos.folionote.data.local.VectorCodec
 import com.sjos.folionote.engine.indexing.EmbeddingTaskType
@@ -70,6 +71,10 @@ class SourceProcessingWorker(
 
         val source = sourceDao.getSourceById(sourceId) ?: return Result.failure()
 
+        // Relê a fonte antes de cada gravação para não sobrescrever alterações feitas pelo usuário
+        // durante a extração (ex.: isSelectedForChat).
+        suspend fun latestSource(): SourceEntity = sourceDao.getSourceById(sourceId) ?: source
+
         return try {
             jobDao.updateJobProgress(jobId, JobStatus.RUNNING.name, 0.1f, "Extraindo texto...")
             sourceDao.updateProcessingState(sourceId, SourceStatus.EXTRACTING.name, 0.15f)
@@ -98,7 +103,7 @@ class SourceProcessingWorker(
                 val ocrMsg = extracted.partialError
                     ?: "Documento sem texto extraível. Verifique o motor de OCR nas Configurações para processar."
                 sourceDao.upsertSource(
-                    source.copy(
+                    latestSource().copy(
                         extractedText = "",
                         pageCount = extracted.pages.size.coerceAtLeast(1),
                         metadataJson = mergedMetaJson,
@@ -116,7 +121,7 @@ class SourceProcessingWorker(
                 val transMsg = extracted.partialError
                     ?: "Mídia salva localmente. Configure um provedor externo de transcrição para gerar texto indexável."
                 sourceDao.upsertSource(
-                    source.copy(
+                    latestSource().copy(
                         extractedText = "",
                         pageCount = extracted.pages.size.coerceAtLeast(1),
                         metadataJson = mergedMetaJson,
@@ -131,7 +136,7 @@ class SourceProcessingWorker(
             }
 
             sourceDao.upsertSource(
-                source.copy(
+                latestSource().copy(
                     extractedText = extracted.fullText,
                     pageCount = extracted.pages.size.coerceAtLeast(1),
                     metadataJson = mergedMetaJson,
