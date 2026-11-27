@@ -12,6 +12,9 @@ import com.sjos.folionote.core.preferences.AppSettings
 import com.sjos.folionote.data.local.CitationEntity
 import com.sjos.folionote.data.local.ConversationEntity
 import com.sjos.folionote.data.local.DocumentChunkEntity
+import com.sjos.folionote.data.local.EmbeddingGroup
+import com.sjos.folionote.data.local.NotebookChunkStats
+import com.sjos.folionote.data.local.SourceChunkCount
 import com.sjos.folionote.data.local.EmbeddingEntity
 import com.sjos.folionote.data.local.MessageEntity
 import com.sjos.folionote.data.local.ModelEntity
@@ -46,8 +49,10 @@ data class NotebookUiState(
     val notebook: NotebookEntity? = null,
     val sources: List<SourceEntity> = emptyList(),
     val sourceSearchQuery: String = "",
-    val chunks: List<DocumentChunkEntity> = emptyList(),
-    val embeddings: List<EmbeddingEntity> = emptyList(),
+    val visibleSources: List<SourceEntity> = emptyList(),
+    val chunkStats: NotebookChunkStats = NotebookChunkStats(0, 0L),
+    val chunkCountsBySource: Map<String, Int> = emptyMap(),
+    val embeddingGroups: List<EmbeddingGroup> = emptyList(),
     val jobs: List<ProcessingJobEntity> = emptyList(),
     val conversations: List<ConversationEntity> = emptyList(),
     val activeConversation: ConversationEntity? = null,
@@ -118,8 +123,9 @@ class NotebookViewModel(
     private data class NotebookSourcesBundle(
         val notebook: NotebookEntity?,
         val sources: List<SourceEntity>,
-        val chunks: List<DocumentChunkEntity>,
-        val embeddings: List<EmbeddingEntity>,
+        val chunkStats: NotebookChunkStats,
+        val chunkCountsBySource: List<SourceChunkCount>,
+        val embeddingGroups: List<EmbeddingGroup>,
         val jobs: List<ProcessingJobEntity>
     )
 
@@ -130,14 +136,19 @@ class NotebookViewModel(
         val artifacts: List<StudioArtifactEntity>
     )
 
+    private val chunkSummaryFlow = combine(
+        notebookRepo.observeChunkStats(notebookId),
+        notebookRepo.observeChunkCountsBySource(notebookId)
+    ) { stats, counts -> stats to counts }
+
     private val sourcesBundleFlow = combine(
         notebookRepo.observeNotebook(notebookId),
         notebookRepo.observeSources(notebookId),
-        notebookRepo.observeChunksForNotebook(notebookId),
-        notebookRepo.observeEmbeddingsForNotebook(notebookId),
+        chunkSummaryFlow,
+        notebookRepo.observeEmbeddingGroups(notebookId),
         notebookRepo.observeProcessingJobs(notebookId)
-    ) { nb, sources, chunks, embeddings, jobs ->
-        NotebookSourcesBundle(nb, sources, chunks, embeddings, jobs)
+    ) { nb, sources, chunkSummary, groups, jobs ->
+        NotebookSourcesBundle(nb, sources, chunkSummary.first, chunkSummary.second, groups, jobs)
     }
 
     private val activeMessagesFlow = MutableStateFlow<List<MessageEntity>>(emptyList())
@@ -244,8 +255,8 @@ class NotebookViewModel(
             }
         }
 
-        val incompatibleLabels = if (activeEmbModel != null && srcBundle.embeddings.isNotEmpty()) {
-            srcBundle.embeddings
+        val incompatibleLabels = if (activeEmbModel != null && srcBundle.embeddingGroups.isNotEmpty()) {
+            srcBundle.embeddingGroups
                 .filter {
                     it.embeddingModelId != activeEmbModel.modelId ||
                         (activeEmbModel.embeddingDimensions != null && activeEmbModel.embeddingDimensions > 0 &&
@@ -257,7 +268,7 @@ class NotebookViewModel(
             emptyList()
         }
 
-        val distinctEmbeddingCollections = srcBundle.embeddings
+        val distinctEmbeddingCollections = srcBundle.embeddingGroups
             .map { "${it.embeddingModelId} (${it.dimensions}d)" }
             .distinct()
         val hasMismatch = incompatibleLabels.isNotEmpty() || distinctEmbeddingCollections.size > 1
@@ -281,10 +292,12 @@ class NotebookViewModel(
         NotebookUiState(
             selectedTab = ctrl.tab,
             notebook = srcBundle.notebook,
-            sources = filteredSources,
+            sources = srcBundle.sources,
+            visibleSources = filteredSources,
             sourceSearchQuery = ctrl.srcQuery,
-            chunks = srcBundle.chunks,
-            embeddings = srcBundle.embeddings,
+            chunkStats = srcBundle.chunkStats,
+            chunkCountsBySource = srcBundle.chunkCountsBySource.associate { it.sourceId to it.chunkCount },
+            embeddingGroups = srcBundle.embeddingGroups,
             jobs = srcBundle.jobs,
             conversations = convBundle.conversations,
             activeConversation = activeConv,
@@ -542,8 +555,10 @@ class NotebookViewModel(
     }
 
     fun setAllSourcesSelected(selected: Boolean) {
+        // Seleciona apenas as fontes visíveis (respeita o filtro de busca).
+        val visibleIds = uiState.value.visibleSources.map { it.id }
         viewModelScope.launch {
-            notebookRepo.setAllSourcesSelected(notebookId, selected)
+            notebookRepo.setSourcesSelected(visibleIds, selected)
         }
     }
 
@@ -569,6 +584,11 @@ class NotebookViewModel(
     }
 
     fun selectModel(modelInternalId: String) {
+        if (activeGenerationJob?.isActive == true) {
+            // Trocar de modelo no meio de uma resposta travada: para a geração e mantém o parcial.
+            stopGeneration()
+            snackbarMessage.value = "Geração interrompida ao trocar de modelo."
+        }
         manualSelectedModelId.value = modelInternalId
         val conv = uiState.value.activeConversation
         if (conv != null) {

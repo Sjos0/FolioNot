@@ -8,8 +8,10 @@ import com.sjos.folionote.data.local.ProviderEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -208,6 +210,15 @@ class OpenAiCompatibleClient(
     }
 
     override fun streamChatCompletion(
+        provider: ProviderEntity,
+        model: ModelEntity,
+        request: ChatCompletionRequest
+    ): Flow<ChatStreamEvent> =
+        // Buffer ilimitado: o produtor (rede) usa trySend, e um buffer pequeno descartava tokens
+        // quando a UI era mais lenta que a rede. A resposta já é limitada por MAX_STREAMED_RESPONSE_CHARS.
+        streamChatCompletionInternal(provider, model, request).buffer(Channel.UNLIMITED)
+
+    private fun streamChatCompletionInternal(
         provider: ProviderEntity,
         model: ModelEntity,
         request: ChatCompletionRequest

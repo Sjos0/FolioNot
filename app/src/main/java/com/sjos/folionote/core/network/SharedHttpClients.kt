@@ -26,6 +26,12 @@ class UpdaterSecurityException(message: String) : IOException(message)
 
 object SharedHttpClients {
 
+    /** Hosts permitidos para o updater (API do GitHub e downloads de release). Aplicado a cada hop de redirecionamento. */
+    val updaterUrlPolicy: UrlAllowlistPolicy = UrlAllowlistPolicy(
+        allowedHostSuffixes = setOf("github.com", "githubusercontent.com"),
+        allowLocalhostForTests = BuildConfig.DEBUG
+    )
+
     private val timeoutInterceptor = Interceptor { chain ->
         val spec = chain.request().tag(RequestTimeoutSpec::class.java)
         var scopedChain = chain

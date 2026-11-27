@@ -227,6 +227,10 @@ class AppPreferencesStore(private val context: Context) {
         context.dataStore.edit { it[Keys.THEME] = theme.name }
     }
 
+    suspend fun setGeminiEmbeddingEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.GEMINI_EMB_ENABLED] = enabled }
+    }
+
     suspend fun setActiveEmbeddingModelId(modelInternalId: String?) {
         context.dataStore.edit {
             if (modelInternalId.isNullOrBlank()) {

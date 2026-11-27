@@ -73,6 +73,10 @@ class ChatOrchestrator(
         internal const val MAX_HISTORY_WINDOW_MESSAGES = 40
         internal const val RAG_PAGE_SIZE = 64
         internal const val STUDIO_CHUNK_PAGE_SIZE = 32
+        // Limite de memória para uma única resposta em streaming (caracteres).
+        internal const val MAX_STREAMED_RESPONSE_CHARS = 200_000
+        // Intervalo mínimo entre atualizações de UI durante o streaming (evita O(n²) de cópias por token).
+        internal const val STREAM_UI_PUBLISH_INTERVAL_MS = 80L
     }
 
     private val conversationDao = db.conversationAndMessageDao()
@@ -82,6 +86,8 @@ class ChatOrchestrator(
     private val toolDao = db.toolAndJobDao()
 
     private val _runtimeState = MutableStateFlow(ChatRuntimeState())
+    // Buffer vivo da resposta em andamento (usado para preservar o parcial ao parar).
+    private var activeStreamBuffer: StringBuilder? = null
     val runtimeState: StateFlow<ChatRuntimeState> = _runtimeState.asStateFlow()
 
     @Volatile
@@ -315,7 +321,9 @@ class ChatOrchestrator(
         conversationId: String?,
         modelDisplayName: String?
     ) {
-        val partial = _runtimeState.value.streamingText.trim()
+        // Só usa o buffer vivo enquanto a resposta ainda está em streaming (evita parcial antigo).
+        val liveText = if (_runtimeState.value.isStreaming) activeStreamBuffer?.toString().orEmpty() else ""
+        val partial = liveText.ifBlank { _runtimeState.value.streamingText }.trim()
         if (partial.isNotEmpty() && !conversationId.isNullOrBlank()) {
             saveAssistantMessage(
                 conversationId = conversationId,
@@ -563,18 +571,30 @@ class ChatOrchestrator(
         )
 
         val textBuffer = StringBuilder()
+        activeStreamBuffer = textBuffer
         var pendingCalls: List<ToolCallRequest> = emptyList()
         var streamError: String? = null
+        var lastPublishedAt = 0L
+        var lastPublishedLength = 0
 
+        try {
         aiClient.streamChatCompletion(provider, model, req).collect { event ->
             when (event) {
                 is ChatStreamEvent.TextDelta -> {
                     textBuffer.append(event.text)
-                    _runtimeState.value = _runtimeState.value.copy(
-                        isStreaming = true,
-                        streamingText = textBuffer.toString(),
-                        activeStatusText = "${model.displayName} respondendo..."
-                    )
+                    if (textBuffer.length > MAX_STREAMED_RESPONSE_CHARS) {
+                        throw StreamResponseTooLargeException()
+                    }
+                    val now = System.currentTimeMillis()
+                    if (now - lastPublishedAt >= STREAM_UI_PUBLISH_INTERVAL_MS || textBuffer.length - lastPublishedLength >= 2048) {
+                        lastPublishedAt = now
+                        lastPublishedLength = textBuffer.length
+                        _runtimeState.value = _runtimeState.value.copy(
+                            isStreaming = true,
+                            streamingText = textBuffer.toString(),
+                            activeStatusText = "${model.displayName} respondendo..."
+                        )
+                    }
                 }
                 is ChatStreamEvent.ToolCallsReady -> {
                     pendingCalls = event.calls
@@ -585,6 +605,11 @@ class ChatOrchestrator(
                 is ChatStreamEvent.Completed -> Unit
             }
         }
+        } catch (e: StreamResponseTooLargeException) {
+            streamError = e.message
+        }
+        // Publica o texto final, pois o throttle pode ter deixado trechos sem publicar.
+        _runtimeState.value = _runtimeState.value.copy(streamingText = textBuffer.toString())
 
         if (streamError != null) {
             val partial = textBuffer.toString().trim()
@@ -875,3 +900,6 @@ class ChatOrchestrator(
         return Result.success(content)
     }
 }
+
+/** Lançada quando uma resposta em streaming passa do limite de memória; interrompe o download. */
+internal class StreamResponseTooLargeException : RuntimeException("Resposta excedeu o limite de tamanho e foi interrompida.")

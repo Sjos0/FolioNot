@@ -504,7 +504,7 @@ private fun EmbeddingsAndToolsTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = state.settings.activeEmbeddingModelId == null,
+                            selected = state.settings.activeEmbeddingModelId == null && !state.settings.isGeminiEmbeddingActive,
                             onClick = { onSelectEmbeddingModel(null) }
                         )
                         Column {
@@ -527,7 +527,7 @@ private fun EmbeddingsAndToolsTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = state.settings.activeEmbeddingModelId == emb.id,
+                                selected = state.settings.activeEmbeddingModelId == emb.id && !state.settings.isGeminiEmbeddingActive,
                                 onClick = { onSelectEmbeddingModel(emb.id) }
                             )
                             Column {

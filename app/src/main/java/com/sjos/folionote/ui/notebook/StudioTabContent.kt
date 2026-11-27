@@ -288,9 +288,9 @@ fun StudioTabContent(
     }
 
     if (showIndexInspector) {
-        val totalTokens = remember(state.chunks) { state.chunks.sumOf { it.tokenEstimate } }
-        val embModelNames = remember(state.embeddings) {
-            state.embeddings.map { "${it.embeddingModelId} (${it.dimensions}d)" }.distinct()
+        val totalTokens = state.chunkStats.totalTokens.toInt()
+        val embModelNames = remember(state.embeddingGroups) {
+            state.embeddingGroups.map { "${it.embeddingModelId} (${it.dimensions}d)" }.distinct()
         }
         AlertDialog(
             onDismissRequest = { showIndexInspector = false },
@@ -298,9 +298,9 @@ fun StudioTabContent(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Fontes indexadas: ${state.sources.size}")
-                    Text("Chunks armazenados: ${state.chunks.size}")
+                    Text("Chunks armazenados: ${state.chunkStats.chunkCount}")
                     Text("Tokens estimados no índice: $totalTokens")
-                    Text("Vetores de embeddings: ${state.embeddings.size}")
+                    Text("Vetores de embeddings: ${state.embeddingGroups.sumOf { it.vectorCount }}")
                     Text(
                         text = if (embModelNames.isEmpty()) {
                             "Modo vetorial: Apenas lexical offline"

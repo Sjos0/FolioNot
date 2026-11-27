@@ -11,6 +11,7 @@ import android.os.StatFs
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.sjos.folionote.core.network.RequestTimeoutSpec
+import com.sjos.folionote.core.network.UrlAllowlistPolicy
 import com.sjos.folionote.core.network.SharedHttpClients
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -318,6 +319,7 @@ class AppUpdateManager(
                     RequestTimeoutSpec::class.java,
                     RequestTimeoutSpec(connectTimeoutSeconds = 20, readTimeoutSeconds = 60)
                 )
+                .tag(UrlAllowlistPolicy::class.java, SharedHttpClients.updaterUrlPolicy)
                 .header("User-Agent", "FolioNote-Android/${apkVerifier.getInstalledAppInfo().versionName}")
             if (resumeOffset > 0L) {
                 reqBuilder.header("Range", "bytes=$resumeOffset-")

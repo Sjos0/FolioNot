@@ -13,6 +13,10 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
+        ndk {
+            // Só ABIs ARM: remove libs x86/x86_64 do ML Kit/PDFBox (~24 MiB). Dispositivos Android reais são ARM.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     applicationId = "com.sjos.folionote"
     minSdk = 24
     targetSdk = 36

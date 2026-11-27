@@ -80,6 +80,9 @@ interface SourceDao {
     @Query("UPDATE sources SET isSelectedForChat = :selected, updatedAt = :now WHERE notebookId = :notebookId")
     suspend fun setAllSourcesSelected(notebookId: String, selected: Boolean, now: Long = System.currentTimeMillis())
 
+    @Query("UPDATE sources SET isSelectedForChat = :selected, updatedAt = :now WHERE id IN (:sourceIds)")
+    suspend fun setSourcesSelected(sourceIds: List<String>, selected: Boolean, now: Long = System.currentTimeMillis())
+
     @Query("UPDATE sources SET processingStatus = :status, indexingProgress = :progress, errorMessage = :errorMessage, updatedAt = :now WHERE id = :sourceId")
     suspend fun updateProcessingState(
         sourceId: String,
@@ -155,6 +158,15 @@ interface ChunkAndEmbeddingDao {
 
     @Query("SELECT * FROM embeddings WHERE notebookId = :notebookId")
     fun observeEmbeddingsForNotebook(notebookId: String): Flow<List<EmbeddingEntity>>
+
+    @Query("SELECT COUNT(*) AS chunkCount, COALESCE(SUM(tokenEstimate), 0) AS totalTokens FROM document_chunks WHERE notebookId = :notebookId")
+    fun observeChunkStats(notebookId: String): Flow<NotebookChunkStats>
+
+    @Query("SELECT sourceId AS sourceId, COUNT(*) AS chunkCount FROM document_chunks WHERE notebookId = :notebookId GROUP BY sourceId")
+    fun observeChunkCountsBySource(notebookId: String): Flow<List<SourceChunkCount>>
+
+    @Query("SELECT embeddingModelId AS embeddingModelId, dimensions AS dimensions, COUNT(*) AS vectorCount FROM embeddings WHERE notebookId = :notebookId GROUP BY embeddingModelId, dimensions")
+    fun observeEmbeddingGroups(notebookId: String): Flow<List<EmbeddingGroup>>
 
     @Upsert
     suspend fun insertEmbeddings(embeddings: List<EmbeddingEntity>)
@@ -406,3 +418,8 @@ interface SyncDao {
     )
     suspend fun hasPendingLocalChanges(): Boolean
 }
+
+// Agregados leves usados pela UI do workspace (evitam carregar chunks/vetores inteiros na RAM).
+data class NotebookChunkStats(val chunkCount: Int, val totalTokens: Long)
+data class SourceChunkCount(val sourceId: String, val chunkCount: Int)
+data class EmbeddingGroup(val embeddingModelId: String, val dimensions: Int, val vectorCount: Int)
