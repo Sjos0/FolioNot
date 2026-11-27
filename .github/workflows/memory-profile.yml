@@ -90,9 +90,20 @@ jobs:
 
       - name: Run measurement case
         run: |
+          set -o pipefail
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:testDebugUnitTest \
-            --tests "com.sjos.folionote.memory.MemoryCaseTests.${{ matrix.case }}"
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon --no-build-cache :app:testDebugUnitTest --rerun \
+                --tests "com.sjos.folionote.memory.MemoryCaseTests.${{ matrix.case }}" 2>&1 | tee gradle-attempt.log; then
+              exit 0
+            fi
+            if grep -q "Failed to fetch maven artifact" gradle-attempt.log && [ "$attempt" -lt 3 ]; then
+              echo "::warning::Robolectric SDK download failed (attempt $attempt of 3); retrying"
+              sleep 30
+              continue
+            fi
+            exit 1
+          done
 
       - name: Surface test failures as annotations
         if: always()
@@ -120,7 +131,7 @@ jobs:
         with:
           name: memory-report-${{ matrix.case }}
           path: app/build/memory-reports/*.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   report:
