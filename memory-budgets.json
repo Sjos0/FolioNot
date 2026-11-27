@@ -1,12 +1,57 @@
 {
-  "description": "Orçamentos de heap da JVM (MB) por caso. Valores iniciais são estimativas; calibrar com os relatórios do primeiro run (ver docs/memory/README.md) antes de usar mode=enforce.",
-  "calibrated": false,
+  "description": "Orçamentos de heap da JVM (MB) por caso, calibrados com 3 runs em main e na PR de confiabilidade. Regra: pico Δ = max(16, 1,5 × maior pico observado); retenção Δ = max(8, 1,5 × maior retenção observada + 8). Recalibrar quando mudar a infraestrutura de CI ou o Robolectric.",
+  "calibrated": true,
   "cases": {
-    "case_idle_startup": {"maxPeakDeltaMB": 64, "maxRetainedMB": 48},
-    "case_workspace_10k_chunks": {"maxPeakDeltaMB": 256, "maxRetainedMB": 160},
-    "case_rag_20k_chunks_bm25": {"maxPeakDeltaMB": 192, "maxRetainedMB": 96},
-    "case_stream_reply_capped_at_limit": {"maxPeakDeltaMB": 128, "maxRetainedMB": 64},
-    "case_stream_3k_small_deltas": {"maxPeakDeltaMB": 96, "maxRetainedMB": 48},
-    "case_history_2000_messages_bounded": {"maxPeakDeltaMB": 160, "maxRetainedMB": 96}
+    "case_history_2000_messages_bounded": {
+      "maxPeakDeltaMB": 17,
+      "maxRetainedMB": 8
+    },
+    "case_stream_3k_small_deltas": {
+      "maxPeakDeltaMB": 24,
+      "maxRetainedMB": 8
+    },
+    "case_stream_reply_capped_at_limit": {
+      "maxPeakDeltaMB": 32,
+      "maxRetainedMB": 8
+    },
+    "case_rag_20k_chunks_bm25": {
+      "maxPeakDeltaMB": 68,
+      "maxRetainedMB": 12
+    },
+    "case_workspace_10k_chunks": {
+      "maxPeakDeltaMB": 52,
+      "maxRetainedMB": 8
+    },
+    "case_idle_startup": {
+      "maxPeakDeltaMB": 16,
+      "maxRetainedMB": 11
+    }
+  },
+  "calibrationSamples": 3,
+  "observedInCalibration": {
+    "case_history_2000_messages_bounded": {
+      "peakMax": 11.1,
+      "retainedMax": -1.5
+    },
+    "case_stream_3k_small_deltas": {
+      "peakMax": 15.9,
+      "retainedMax": -0.2
+    },
+    "case_stream_reply_capped_at_limit": {
+      "peakMax": 20.9,
+      "retainedMax": 0.0
+    },
+    "case_rag_20k_chunks_bm25": {
+      "peakMax": 44.8,
+      "retainedMax": 2.5
+    },
+    "case_workspace_10k_chunks": {
+      "peakMax": 34.3,
+      "retainedMax": -0.7
+    },
+    "case_idle_startup": {
+      "peakMax": 5.1,
+      "retainedMax": 1.6
+    }
   }
 }
