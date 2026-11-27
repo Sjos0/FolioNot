@@ -77,6 +77,14 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
+      - name: Cache Robolectric android-all artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            robolectric-${{ runner.os }}-
+
       - name: Set up Gradle from the committed Wrapper
         uses: gradle/actions/setup-gradle@v4
 
