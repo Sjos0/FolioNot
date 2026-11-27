@@ -86,6 +86,26 @@ jobs:
           ./gradlew --no-daemon :app:testDebugUnitTest \
             --tests "com.sjos.folionote.memory.MemoryCaseTests.${{ matrix.case }}"
 
+      - name: Surface test failures as annotations
+        if: always()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in app/build/test-results/testDebugUnitTest/*.xml; do
+            python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          def esc(t):
+              return (t or "").replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for tc in root.iter("testcase"):
+              for kind in ("failure", "error"):
+                  for node in tc.findall(kind):
+                      msg = (node.get("message") or "")[:600]
+                      body = (node.text or "")[:2500]
+                      print("::error::" + esc(tc.get("classname") + " :: " + tc.get("name") + " => " + msg + "\n" + body))
+          PY
+          done
+
       - name: Upload memory report
         if: always()
         uses: actions/upload-artifact@v4
