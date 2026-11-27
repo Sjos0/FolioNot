@@ -427,6 +427,7 @@ fun ChatTabContent(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
+                            .minimumInteractiveComponentSize()
                             .clickable(onClick = onOpenSourcesTab)
                             .padding(horizontal = 6.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -453,6 +454,7 @@ fun ChatTabContent(
                         color = if (isStreaming || canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
                         shape = CircleShape,
                         modifier = Modifier
+                            .minimumInteractiveComponentSize()
                             .size(40.dp)
                             .clip(CircleShape)
                             .clickable(enabled = isStreaming || canSend) {

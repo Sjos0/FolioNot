@@ -1,0 +1,35 @@
+{
+  "description": "Casos de medição de RAM (heap da JVM sob Robolectric). Cada id é um método em app/src/test/java/com/sjos/folionote/memory/MemoryCaseTests.kt.",
+  "cases": [
+    {
+      "id": "case_idle_startup",
+      "title": "Inicialização sem dados",
+      "risk": "custo fixo do app"
+    },
+    {
+      "id": "case_workspace_10k_chunks",
+      "title": "Agregados do workspace com 10 mil chunks (camada DAO)",
+      "risk": "carregar vetores inteiros para a UI"
+    },
+    {
+      "id": "case_rag_20k_chunks_bm25",
+      "title": "Recuperação BM25 em 20 mil chunks",
+      "risk": "varredura sem paginação"
+    },
+    {
+      "id": "case_stream_reply_capped_at_limit",
+      "title": "Resposta em streaming acima do limite",
+      "risk": "resposta sem teto"
+    },
+    {
+      "id": "case_stream_3k_small_deltas",
+      "title": "Streaming com 3 mil deltas",
+      "risk": "cópias O(n²) por token"
+    },
+    {
+      "id": "case_history_2000_messages_bounded",
+      "title": "Conversa com 2 mil mensagens",
+      "risk": "histórico sem janela"
+    }
+  ]
+}

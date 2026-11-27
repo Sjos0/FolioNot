@@ -22,3 +22,6 @@ debug.keystore
 /.signing/
 /my-upload-key.jks
 /debug.keystore
+
+__pycache__/
+*.pyc

@@ -1,0 +1,160 @@
+name: Memory profile (heap budgets per case)
+
+# Arquitetura:
+#   plan    -> lê memory-cases.json e gera a matriz (uma fonte de verdade para os casos)
+#   measure -> um job por caso: roda o método de teste correspondente e envia o relatório JSON
+#   report  -> junta os relatórios, compara com memory-budgets.json e publica um resumo
+# Modo "report" nunca falha por orçamento; "enforce" falha quando um caso estoura.
+
+on:
+  workflow_dispatch:
+    inputs:
+      budget_mode:
+        description: "report: só mede e publica. enforce: falha se algum caso estourar o orçamento."
+        type: choice
+        options: [report, enforce]
+        default: report
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "memory-cases.json"
+      - "memory-budgets.json"
+      - "scripts/memory_budget_check.py"
+      - ".github/workflows/memory-profile.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Plan cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build matrix from memory-cases.json
+        id: plan
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          cases = [c["id"] for c in json.load(open("memory-cases.json", encoding="utf-8"))["cases"]]
+          print("matrix=" + json.dumps({"case": cases}))
+          PY
+
+  measure:
+    name: Measure ${{ matrix.case }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Cache Robolectric android-all artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            robolectric-${{ runner.os }}-
+
+      - name: Set up Gradle from the committed Wrapper
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run measurement case
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest \
+            --tests "com.sjos.folionote.memory.MemoryCaseTests.${{ matrix.case }}"
+
+      - name: Surface test failures as annotations
+        if: always()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in app/build/test-results/testDebugUnitTest/*.xml; do
+            python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          def esc(t):
+              return (t or "").replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for tc in root.iter("testcase"):
+              for kind in ("failure", "error"):
+                  for node in tc.findall(kind):
+                      msg = (node.get("message") or "")[:600]
+                      body = (node.text or "")[:2500]
+                      print("::error::" + esc(tc.get("classname") + " :: " + tc.get("name") + " => " + msg + "\n" + body))
+          PY
+          done
+
+      - name: Upload memory report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-report-${{ matrix.case }}
+          path: app/build/memory-reports/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    name: Budget report
+    needs: measure
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all memory reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: memory-report-*
+          path: reports
+          merge-multiple: true
+
+      - name: Compare with budgets and publish summary
+        env:
+          BUDGET_MODE: ${{ inputs.budget_mode || 'report' }}
+        run: |
+          python3 scripts/memory_budget_check.py \
+            --reports reports \
+            --budgets memory-budgets.json \
+            --mode "$BUDGET_MODE" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload consolidated reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-reports-consolidated
+          path: reports
+          if-no-files-found: warn
+          retention-days: 30
