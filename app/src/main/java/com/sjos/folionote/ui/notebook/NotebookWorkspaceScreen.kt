@@ -1,5 +1,8 @@
 package com.sjos.folionote.ui.notebook
 
+import androidx.compose.foundation.lazy.LazyRow
+import com.sjos.folionote.ui.theme.NotebookIcons
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -236,7 +239,7 @@ fun NotebookWorkspaceScreen(
                         }
                     }
                     IconButton(onClick = onOpenProviders) {
-                        Icon(FolioIcons.Outlined.Settings, contentDescription = "Provedores e Modelos")
+                        Icon(FolioIcons.Outlined.Apps, contentDescription = "Provedores e Modelos")
                     }
                 }
 
@@ -436,6 +439,7 @@ fun NotebookWorkspaceScreen(
     if (showCustomizeDialog && state.notebook != null) {
         var title by remember(state.notebook) { mutableStateOf(state.notebook!!.title) }
         var desc by remember(state.notebook) { mutableStateOf(state.notebook!!.description) }
+        var iconKey by remember(state.notebook) { mutableStateOf(state.notebook!!.iconKey) }
         AlertDialog(
             onDismissRequest = { showCustomizeDialog = false },
             title = { Text("Personalizar notebook") },
@@ -443,11 +447,26 @@ fun NotebookWorkspaceScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Nome") }, singleLine = true)
                     OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Descrição") }, maxLines = 3)
+                    Text("Ícone", style = MaterialTheme.typography.labelMedium)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(NotebookIcons.all, key = { it.key }) { spec ->
+                            val selected = spec.key == iconKey
+                            Surface(
+                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.size(44.dp).clickable { iconKey = spec.key }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(spec.icon, contentDescription = spec.label, tint = spec.tint)
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.updateNotebookDetails(title, desc, state.notebook!!.iconKey)
+                    viewModel.updateNotebookDetails(title, desc, iconKey)
                     showCustomizeDialog = false
                 }) { Text("Salvar") }
             },

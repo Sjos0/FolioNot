@@ -1,5 +1,11 @@
 package com.sjos.folionote
 
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.sjos.folionote.engine.updater.UpdateUiState
+import com.sjos.folionote.ui.settings.AppUpdateDialog
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -64,6 +70,31 @@ class MainActivity : ComponentActivity() {
 
             FolioNoteTheme(themePreference = settings.themePreference) {
                 val navController = rememberNavController()
+                val backStackEntry by navController.currentBackStackEntryAsState()
+                val appUpdateState by appContainer.appUpdateManager.uiState.collectAsStateWithLifecycle()
+                var updateDismissed by remember { mutableStateOf(false) }
+                val currentUpdate = appUpdateState
+                val onSettingsScreen = backStackEntry?.destination?.route == FolioRoutes.SETTINGS
+                // Aviso de atualização aparece em qualquer tela (não só em Configurações); a tela de Configurações mostra o seu próprio.
+                if (currentUpdate is UpdateUiState.UpdateAvailable && !updateDismissed && !onSettingsScreen) {
+                    AppUpdateDialog(
+                        updateState = currentUpdate,
+                        installedVersionLabel = currentUpdate.installedVersionName,
+                        activity = this@MainActivity,
+                        onStartOrResumeDownload = { update -> appContainer.appUpdateManager.startOrResumeDownload(update) },
+                        onCancelDownload = { appContainer.appUpdateManager.cancelDownload() },
+                        onRetryCheck = { appContainer.appUpdateManager.checkForUpdates() },
+                        onOpenInstallPermissionSettings = {
+                            appContainer.appUpdateManager.createUnknownSourcesSettingsIntent()?.let { startActivity(it) }
+                        },
+                        onLaunchInstaller = { appContainer.appUpdateManager.launchSystemInstaller(this@MainActivity) },
+                        onRefreshAfterExternalReturn = { appContainer.appUpdateManager.refreshStateAfterExternalReturn() },
+                        onDismiss = {
+                            appContainer.appUpdateManager.dismissOrResetToIdle()
+                            updateDismissed = true
+                        }
+                    )
+                }
 
                 NavHost(
                     navController = navController,

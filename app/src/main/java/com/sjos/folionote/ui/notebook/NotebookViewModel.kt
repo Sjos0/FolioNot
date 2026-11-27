@@ -584,6 +584,11 @@ class NotebookViewModel(
     }
 
     fun selectModel(modelInternalId: String) {
+        if (activeGenerationJob?.isActive == true) {
+            // Trocar de modelo no meio de uma resposta travada: para a geração e mantém o parcial.
+            stopGeneration()
+            snackbarMessage.value = "Geração interrompida ao trocar de modelo."
+        }
         manualSelectedModelId.value = modelInternalId
         val conv = uiState.value.activeConversation
         if (conv != null) {

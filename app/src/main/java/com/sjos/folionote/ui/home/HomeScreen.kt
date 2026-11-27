@@ -1248,10 +1248,10 @@ private fun ShareWebClipDialog(
     onDismiss: () -> Unit,
     onConfirm: (notebookId: String?, newNotebookTitle: String?) -> Unit
 ) {
-    var selectedNotebookId by remember(notebooks) {
+    var selectedNotebookId by remember(notebooks.isEmpty()) {
         mutableStateOf(notebooks.firstOrNull()?.id)
     }
-    var createNew by remember(notebooks) { mutableStateOf(notebooks.isEmpty()) }
+    var createNew by remember(notebooks.isEmpty()) { mutableStateOf(notebooks.isEmpty()) }
     var newTitle by remember { mutableStateOf("Web Clips") }
 
     AlertDialog(
