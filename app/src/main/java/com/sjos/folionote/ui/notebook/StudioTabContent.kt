@@ -1,5 +1,8 @@
 package com.sjos.folionote.ui.notebook
 
+import com.sjos.folionote.ui.components.DestructiveConfirmDialog
+import androidx.compose.foundation.layout.heightIn
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -70,6 +73,8 @@ fun StudioTabContent(
     onReindexAll: () -> Unit,
     onOpenReaderAtChunk: (sourceId: String, page: Int, chunkId: String) -> Unit
 ) {
+    // Exclusão de material exige confirmação: o item fica pendente até o usuário confirmar.
+    var pendingDeleteArtifact by remember { mutableStateOf<StudioArtifactEntity?>(null) }
     var showLexicalSearchSheet by remember { mutableStateOf(false) }
     var showIndexInspector by remember { mutableStateOf(false) }
     var readingArtifact by remember { mutableStateOf<StudioArtifactEntity?>(null) }
@@ -133,6 +138,20 @@ fun StudioTabContent(
         )
     }
 
+    pendingDeleteArtifact?.let { artifact ->
+        DestructiveConfirmDialog(
+            title = "Excluir \"${artifact.title}\"?",
+            message = "Este material será removido do caderno. Esta ação não pode ser desfeita; as fontes originais não são afetadas.",
+            confirmLabel = "Excluir",
+            confirmTag = "confirm_delete_artifact",
+            onConfirm = {
+                onDeleteArtifact(artifact.id)
+                pendingDeleteArtifact = null
+            },
+            onDismiss = { pendingDeleteArtifact = null }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -165,7 +184,9 @@ fun StudioTabContent(
                             }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                            modifier = Modifier
+                                .heightIn(min = 64.dp)
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(tile.icon, contentDescription = null, tint = tile.tint, modifier = Modifier.size(20.dp))
@@ -173,7 +194,7 @@ fun StudioTabContent(
                             Text(
                                 text = tile.title,
                                 style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -223,7 +244,7 @@ fun StudioTabContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        IconButton(onClick = { onDeleteArtifact(artifact.id) }) {
+                        IconButton(onClick = { pendingDeleteArtifact = artifact }) {
                             Icon(FolioIcons.Outlined.DeleteOutline, contentDescription = "Excluir nota")
                         }
                     }

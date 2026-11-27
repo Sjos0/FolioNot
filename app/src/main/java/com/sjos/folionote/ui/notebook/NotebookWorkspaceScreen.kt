@@ -1,5 +1,8 @@
 package com.sjos.folionote.ui.notebook
 
+import androidx.compose.material3.minimumInteractiveComponentSize
+import com.sjos.folionote.ui.components.DestructiveConfirmDialog
+
 import androidx.compose.foundation.lazy.LazyRow
 import com.sjos.folionote.ui.theme.NotebookIcons
 
@@ -86,6 +89,7 @@ fun NotebookWorkspaceScreen(
     var showHistorySheet by remember { mutableStateOf(false) }
     var showBudgetDialog by remember { mutableStateOf(false) }
     var showCustomizeDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showGoogleDriveSheet by remember { mutableStateOf(false) }
 
     val supportedMimeTypes = remember {
@@ -233,7 +237,7 @@ fun NotebookWorkspaceScreen(
                                 leadingIcon = { Icon(FolioIcons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showOverflowMenu = false
-                                    viewModel.clearActiveConversationHistory()
+                                    showClearHistoryDialog = true
                                 }
                             )
                         }
@@ -266,6 +270,7 @@ fun NotebookWorkspaceScreen(
                                         if (selected) MaterialTheme.colorScheme.surfaceContainerHigh
                                         else MaterialTheme.colorScheme.surfaceContainerLow
                                     )
+                                    .minimumInteractiveComponentSize()
                                     .clickable { viewModel.selectTab(tab) }
                                     .padding(vertical = 9.dp)
                                     .testTag("notebook_tab_${tab.name.lowercase()}"),
@@ -433,6 +438,20 @@ fun NotebookWorkspaceScreen(
             confirmButton = {
                 Button(onClick = { showBudgetDialog = false }) { Text("Fechar") }
             }
+        )
+    }
+
+    if (showClearHistoryDialog) {
+        DestructiveConfirmDialog(
+            title = "Excluir histórico desta conversa?",
+            message = "Todas as mensagens da conversa ativa serão removidas. Fontes, notas do Studio e o caderno não são afetados. Esta ação não pode ser desfeita.",
+            confirmLabel = "Excluir histórico",
+            confirmTag = "confirm_clear_history",
+            onConfirm = {
+                viewModel.clearActiveConversationHistory()
+                showClearHistoryDialog = false
+            },
+            onDismiss = { showClearHistoryDialog = false }
         )
     }
 

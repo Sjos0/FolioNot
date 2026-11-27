@@ -1,0 +1,12 @@
+{
+  "description": "Orçamentos de heap da JVM (MB) por caso. Valores iniciais são estimativas; calibrar com os relatórios do primeiro run (ver docs/memory/README.md) antes de usar mode=enforce.",
+  "calibrated": false,
+  "cases": {
+    "case_idle_startup": {"maxPeakDeltaMB": 64, "maxRetainedMB": 48},
+    "case_workspace_10k_chunks": {"maxPeakDeltaMB": 256, "maxRetainedMB": 160},
+    "case_rag_20k_chunks_bm25": {"maxPeakDeltaMB": 192, "maxRetainedMB": 96},
+    "case_stream_reply_capped_at_limit": {"maxPeakDeltaMB": 128, "maxRetainedMB": 64},
+    "case_stream_3k_small_deltas": {"maxPeakDeltaMB": 96, "maxRetainedMB": 48},
+    "case_history_2000_messages_bounded": {"maxPeakDeltaMB": 160, "maxRetainedMB": 96}
+  }
+}

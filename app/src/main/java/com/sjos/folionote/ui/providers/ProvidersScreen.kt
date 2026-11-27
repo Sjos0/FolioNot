@@ -1,5 +1,7 @@
 package com.sjos.folionote.ui.providers
 
+import androidx.compose.material3.minimumInteractiveComponentSize
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -109,7 +111,8 @@ fun ProvidersScreen(
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f)
                     )
-                    Button(
+                    // Aba Embeddings & Tools (2) não tem criação de provedor/modelo: o CTA fica oculto.
+                    if (selectedTab != 2) Button(
                         onClick = {
                             if (selectedTab == 1) {
                                 editingModel = null
@@ -146,6 +149,7 @@ fun ProvidersScreen(
                                         if (selected) MaterialTheme.colorScheme.surfaceContainerHigh
                                         else MaterialTheme.colorScheme.surfaceContainerLow
                                     )
+                                    .minimumInteractiveComponentSize()
                                     .clickable { selectedTab = idx }
                                     .padding(vertical = 9.dp),
                                 contentAlignment = Alignment.Center
