@@ -79,6 +79,9 @@ def main():
     markdown = render(rows, args.mode, budgets.get("calibrated", False))
 
     print(markdown)
+    # Anotações visíveis na API do GitHub (um aviso por caso), além do resumo do job.
+    for case, peak, retained, limits, status in rows:
+        print(f"::notice title=memória {case}::pico {peak} MB, retido {retained} MB, status {status}")
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as fh:
             fh.write(markdown)
