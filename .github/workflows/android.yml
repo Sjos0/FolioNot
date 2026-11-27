@@ -128,9 +128,20 @@ jobs:
 
       - name: Run unit tests (API 24..36 matrix) and build debug APK
         run: |
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest \
-            -PappVersionName="$APP_VERSION_NAME" \
-            -PappVersionCode="$APP_VERSION_CODE"
+          set -o pipefail
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest \
+                -PappVersionName="$APP_VERSION_NAME" \
+                -PappVersionCode="$APP_VERSION_CODE" 2>&1 | tee gradle-attempt.log; then
+              exit 0
+            fi
+            if grep -q "Failed to fetch maven artifact" gradle-attempt.log && [ "$attempt" -lt 3 ]; then
+              echo "::warning::Robolectric SDK download failed (attempt $attempt of 3); retrying"
+              sleep 30
+              continue
+            fi
+            exit 1
+          done
 
       - name: Run release lint and build with ephemeral CI signing key
         if: ${{ github.ref_type != 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.build_release_preview) }}
