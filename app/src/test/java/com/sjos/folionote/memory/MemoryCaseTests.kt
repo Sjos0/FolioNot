@@ -309,6 +309,7 @@ internal class HeapProbe(private val caseId: String) {
             .put("peakMB", mb(peakBytes))
             .put("peakDeltaMB", mb(peakBytes - baseline))
             .put("retainedMB", mb(retainedBytes))
+            .put("retainedDeltaMB", mb(retainedBytes - baseline))
             .put("durationMs", durationMs)
             .put("jvmMaxMB", mb(runtime.maxMemory()))
         extra.forEach { (k, v) -> report.put(k, v) }

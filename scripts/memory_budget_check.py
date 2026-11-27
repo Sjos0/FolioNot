@@ -31,17 +31,20 @@ def evaluate(reports, budgets):
             rows.append((case, "-", "-", limits, "SEM RELATÓRIO"))
             failures.append(f"{case}: sem relatório")
             continue
+        retained = rep.get("retainedDeltaMB", rep["retainedMB"])
         peak_ok = rep["peakDeltaMB"] <= limits["maxPeakDeltaMB"]
-        ret_ok = rep["retainedMB"] <= limits["maxRetainedMB"]
+        ret_ok = retained <= limits["maxRetainedMB"]
         status = "OK" if peak_ok and ret_ok else "ESTOUROU"
         if not peak_ok:
             failures.append(f"{case}: pico {rep['peakDeltaMB']} MB > {limits['maxPeakDeltaMB']} MB")
         if not ret_ok:
-            failures.append(f"{case}: retido {rep['retainedMB']} MB > {limits['maxRetainedMB']} MB")
-        rows.append((case, rep["peakDeltaMB"], rep["retainedMB"], limits, status))
-    for case in reports:
+            failures.append(f"{case}: retenção Δ {retained} MB > {limits['maxRetainedMB']} MB")
+        rows.append((case, rep["peakDeltaMB"], retained, limits, status))
+    for case, rep in reports.items():
         if case not in budgets["cases"]:
-            rows.append((case, reports[case]["peakDeltaMB"], reports[case]["retainedMB"], {}, "SEM ORÇAMENTO"))
+            retained = rep.get("retainedDeltaMB", rep["retainedMB"])
+            rows.append((case, rep["peakDeltaMB"], retained, {}, "SEM ORÇAMENTO"))
+            failures.append(f"{case}: caso sem orçamento em memory-budgets.json")
     return rows, failures
 
 
@@ -51,7 +54,7 @@ def render(rows, mode, calibrated):
         "",
         f"Modo: **{mode}** · orçamentos calibrados: **{'sim' if calibrated else 'não (estimativas iniciais)'}**",
         "",
-        "| Caso | Pico Δ (MB) | Retido (MB) | Orçamento pico/retido (MB) | Status |",
+        "| Caso | Pico Δ (MB) | Retenção Δ (MB) | Orçamento pico/retenção (MB) | Status |",
         "| --- | ---: | ---: | --- | --- |",
     ]
     for case, peak, retained, limits, status in rows:

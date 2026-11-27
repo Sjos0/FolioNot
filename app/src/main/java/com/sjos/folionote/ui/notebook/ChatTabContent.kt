@@ -454,8 +454,8 @@ fun ChatTabContent(
                         color = if (isStreaming || canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
                         shape = CircleShape,
                         modifier = Modifier
-                            .size(40.dp)
                             .minimumInteractiveComponentSize()
+                            .size(40.dp)
                             .clip(CircleShape)
                             .clickable(enabled = isStreaming || canSend) {
                                 if (isStreaming) {

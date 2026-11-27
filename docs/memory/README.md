@@ -6,7 +6,7 @@
 - `app/src/test/.../memory/MemoryCaseTests.kt`: um método `case_*` por caso. Cada método mede o
   heap da JVM (pico durante o caso e retenção após GC) e grava `app/build/memory-reports/<caso>.json`.
 - `memory-budgets.json`: orçamentos por caso (pico Δ e retenção, em MB).
-- `scripts/memory_budget_check.py`: compara relatórios com orçamentos, gera a tabela do resumo do job
+- `scripts/memory_budget_check.py`: compara relatórios com orçamentos (retenção medida como Δ em relação à linha de base do caso), gera a tabela do resumo do job
   e, em modo `enforce`, falha quando algum caso estoura.
 - Jobs: `plan` → `measure` (um por caso, em paralelo) → `report` (resumo + artefato consolidado).
 
