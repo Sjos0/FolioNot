@@ -15,7 +15,8 @@ android {
   defaultConfig {
         ndk {
             // Só ABIs ARM: remove libs x86/x86_64 do ML Kit/PDFBox (~24 MiB). Dispositivos Android reais são ARM.
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // Emulador de CI (-Pe2eEmulator=true) usa x86_64; o APK de usuário continua só ARM.
+            abiFilters += if (project.hasProperty("e2eEmulator")) listOf("x86_64") else listOf("arm64-v8a", "armeabi-v7a")
         }
     applicationId = "com.sjos.folionote"
     minSdk = 24
