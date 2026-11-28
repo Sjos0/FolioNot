@@ -145,6 +145,14 @@ class Ui:
             return png, texts
         return png, []
 
+    def replace_text(self, current_value_pattern, text, timeout=20):
+        """Troca o conteúdo de um campo localizado pelo valor atual (o rótulo some quando o campo tem valor)."""
+        node = self.tap_text(current_value_pattern, timeout=timeout)
+        self.adb("shell", "input", "keyevent", "123")  # MOVE_END
+        for _ in range(120):
+            self.adb("shell", "input", "keyevent", "67")  # DEL
+        self.type_text(text)
+
     def device_back(self):
         self.adb("shell", "input", "keyevent", "4")
         time.sleep(1.2)
