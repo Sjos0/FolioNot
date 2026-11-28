@@ -136,7 +136,6 @@ def step_configure_chat_provider(ui, model_id):
     # O formulário já vem com o endereço da OpenAI; troca pelo gateway do Kilo.
     ui.replace_text(r"^https://api\.openai\.com/v1$", KILO_BASE, timeout=20)
     # Sem chave de API: o campo fica vazio e nenhum cabeçalho de autenticação é enviado.
-    ui.adb("shell", "input", "keyevent", "111")  # ESC: fecha o teclado antes de rolar até o botão
     ui.tap_text(r"^Salvar provedor$", timeout=45, clickable_only=True)
     ui.wait_for(r"Kilo Gateway", timeout=40)
     if ui.dismiss_if_present(r"Modelos", timeout=3) is False:
