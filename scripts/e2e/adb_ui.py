@@ -26,10 +26,18 @@ class Ui:
             raise RuntimeError(f"adb {' '.join(args)} falhou: {res.stderr.decode(errors='replace')[:300]}")
         return res.stdout
 
-    def dump(self):
-        self.adb("shell", "uiautomator", "dump", "/sdcard/window.xml")
-        xml = self.adb("exec-out", "cat", "/sdcard/window.xml")
-        return ET.fromstring(xml)
+    def dump(self, attempts=6):
+        """Lê a hierarquia da tela; o uiautomator às vezes falha com a tela ocupada, então tenta de novo."""
+        last_error = None
+        for _ in range(attempts):
+            self.adb("shell", "uiautomator", "dump", "/sdcard/window.xml")
+            xml = self.adb("exec-out", "cat", "/sdcard/window.xml")
+            try:
+                return ET.fromstring(xml)
+            except ET.ParseError as exc:
+                last_error = exc
+                time.sleep(1.5)
+        raise RuntimeError(f"uiautomator não gerou a hierarquia após {attempts} tentativas: {last_error}")
 
     @staticmethod
     def _nodes(root):
@@ -104,8 +112,11 @@ class Ui:
         self.shot_index += 1
         base = f"{self.shot_index:02d}-{name}"
         png = os.path.join(self.out, base + ".png")
+        data = self.adb("exec-out", "screencap", "-p")
+        if len(data) < 1000:
+            raise RuntimeError(f"captura de tela vazia ({len(data)} bytes) em {name}")
         with open(png, "wb") as fh:
-            fh.write(self.adb("exec-out", "screencap", "-p"))
+            fh.write(data)
         if dump:
             root = self.dump()
             texts = [n.get("text") for n in self._nodes(root) if n.get("text")]
