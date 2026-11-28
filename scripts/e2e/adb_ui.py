@@ -86,7 +86,7 @@ class Ui:
             if node is not None:
                 return node
             if scroll and swipes < 12:
-                self.adb("shell", "input", "swipe", "540", "1500", "540", "700", "300")
+                self.adb("shell", "input", "swipe", "540", "950", "540", "350", "300")  # acima do teclado
                 swipes += 1
                 time.sleep(0.8)
             else:
