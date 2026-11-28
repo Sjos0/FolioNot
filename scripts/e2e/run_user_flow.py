@@ -131,21 +131,22 @@ def step_configure_chat_provider(ui, model_id):
     # Provedores e Modelos: ícone da barra do workspace (descrição "Provedores e Modelos").
     ui.tap_text(r"Provedores e Modelos", timeout=30, clickable_only=True)
     ui.tap_text(r"Adicionar primeiro provedor", timeout=30, clickable_only=True)
+    ui.screenshot("formulario_provedor_vazio")
     ui.tap_text(r"Nome do provedor", timeout=20)
     ui.type_text("Kilo Gateway")
     # O formulário já vem com o endereço da OpenAI; troca pelo gateway do Kilo.
     ui.replace_text(r"^https://api\.openai\.com/v1$", KILO_BASE, timeout=20)
+    ui.screenshot("formulario_provedor_preenchido")
     # Sem chave de API: o campo fica vazio e nenhum cabeçalho de autenticação é enviado.
     ui.tap_text(r"^Salvar provedor$", timeout=45, clickable_only=True)
-    ui.wait_for(r"Kilo Gateway", timeout=40)
-    if ui.dismiss_if_present(r"Modelos", timeout=3) is False:
-        pass
+    ui.wait_for(r"kilo\.ai", timeout=40)
+    ui.tap_text(r"^Modelos$", timeout=20, clickable_only=True)
     ui.tap_text(r"Cadastrar modelo manualmente", timeout=30, clickable_only=True)
     ui.tap_text(r"Model ID na API", timeout=20)
     ui.type_text(model_id)
     ui.tap_text(r"Nome de exibição", timeout=20)
     ui.type_text("Modelo gratuito Kilo")
-    ui.tap_text(r"^Salvar modelo$", timeout=20, clickable_only=True)
+    ui.tap_text(r"^Salvar modelo$", timeout=45, clickable_only=True)
     ui.wait_for(r"Modelo gratuito Kilo", timeout=40)
     return f"provedor sem chave e modelo {model_id} cadastrados"
 
