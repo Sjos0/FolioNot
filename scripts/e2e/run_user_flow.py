@@ -117,8 +117,12 @@ def step_import_txt(ui):
     # A aba Fontes mostra direto as opções: Arquivos, Criar nota, Adicionar URL, Google Drive.
     ui.tap_text(r"^Arquivos$", timeout=30, clickable_only=True)
     # Seletor do sistema (Storage Access Framework): Downloads -> arquivo de perfil.
-    ui.tap_text(r"Downloads|Transferências|Baixados", timeout=40)
-    ui.tap_text(PROFILE_NAME.replace(".", r"\."), timeout=40)
+    # O seletor pode listar o arquivo em "Recentes" ou exigir abrir uma pasta (locale do emulador: inglês).
+    try:
+        ui.tap_text(PROFILE_NAME.replace(".", r"\."), timeout=15)
+    except TimeoutError:
+        ui.tap_text(r"Downloads|Transferências|Baixados|Documents", timeout=20)
+        ui.tap_text(PROFILE_NAME.replace(".", r"\."), timeout=40)
     ui.wait_for(r"perfil_usuario", timeout=90)
     return "arquivo importado via seletor do sistema"
 
