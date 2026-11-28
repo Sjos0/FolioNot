@@ -57,7 +57,7 @@ class Ui:
         rx = re.compile(pattern, re.IGNORECASE)
         parents = {child: parent for parent in root.iter() for child in parent}
         for node in self._nodes(root):
-            label = f"{node.get('text', '')} {node.get('content-desc', '')}"
+            label = " ".join(part for part in (node.get("text", ""), node.get("content-desc", "")) if part)
             if not rx.search(label) or not self._center(node.get("bounds")):
                 continue
             if clickable_only and not self._is_clickable(node, parents):
