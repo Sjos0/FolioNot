@@ -1,7 +1,6 @@
 name: E2E user flow (emulator)
 
-# Roteiro de usuário real no emulador mais leve possível (API 29 = Android 10, imagem aosp_atd,
-# sem serviços Google, x86_64 com KVM). Gera prints de cada tela e um relatório por etapa.
+# Roteiro de usuário real no emulador API 29 (Android 10) x86_64 com KVM (imagem default, oficial). Gera prints de cada tela e um relatório por etapa.
 # Os prints são publicados na branch temporária e2e/inspect para inspeção (apagada depois).
 
 on:
@@ -39,12 +38,13 @@ jobs:
 
       - name: Install SDK, emulator and API 29 system image
         run: |
+          yes | sdkmanager --licenses > /dev/null
           sdkmanager --install \
             "platforms;android-36" \
             "build-tools;36.0.0" \
             "platform-tools" \
             "emulator" \
-            "system-images;android-29;aosp_atd;x86_64"
+            "system-images;android-29;default;x86_64"
 
       - name: Enable KVM acceleration
         run: |
@@ -66,13 +66,13 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/avd/*.ini
-          key: avd-api29-aosp_atd-x86_64-v1
+          key: avd-api29-default-x86_64-v1
 
       - name: Run user flow on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
-          target: aosp_atd
+          target: default
           arch: x86_64
           profile: Nexus 5X
           disable-animations: true
