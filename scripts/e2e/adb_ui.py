@@ -87,7 +87,14 @@ class Ui:
         raise TimeoutError(f"não apareceu na tela: {pattern!r}")
 
     def tap_text(self, pattern, timeout=30, clickable_only=False):
-        node = self.wait_for(pattern, timeout, clickable_only=clickable_only)
+        try:
+            node = self.wait_for(pattern, timeout, clickable_only=clickable_only)
+        except TimeoutError:
+            if not clickable_only:
+                raise
+            # Fallback: em Compose o toque no texto alcança o botão pai; registra o que foi achado.
+            node = self.wait_for(pattern, 8, clickable_only=False)
+            print(f"[aviso] '{pattern}' sem ancestral clicável; tocando no texto: {dict(node.attrib)}", flush=True)
         x, y = self._center(node.get("bounds"))
         self.adb("shell", "input", "tap", str(x), str(y))
         time.sleep(1.2)
