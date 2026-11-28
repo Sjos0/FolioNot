@@ -54,6 +54,27 @@ def free_kilo_model():
     return free[0]
 
 
+def probe_kilo(model_id):
+    """Diagnóstico: chamada direta ao gateway, sem o app, para saber se o modelo gratuito aceita requisição anônima."""
+    body = json.dumps({
+        "model": model_id,
+        "messages": [{"role": "user", "content": "Responda apenas: ok"}],
+        "max_tokens": 8,
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        KILO_BASE + "chat/completions", data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            return resp.status, resp.read(600).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(600).decode("utf-8", "replace")
+    except Exception as exc:  # rede/timeout: registra, não quebra o roteiro
+        return None, f"{type(exc).__name__}: {exc}"[:600]
+
+
 def run(args):
     ui = Ui(args.out, args.serial)
     rep = Report(os.path.join(args.out, "report.json"))
@@ -70,6 +91,10 @@ def run(args):
     with open(local, "w", encoding="utf-8") as fh:
         fh.write(PROFILE_CONTENT)
     ui.adb("push", local, f"/sdcard/Download/{PROFILE_NAME}")
+
+    status, sample = probe_kilo(model_id)
+    rep.ok("sonda_kilo_sem_chave", f"HTTP {status}: {sample[:300]}")
+    rep.save()
 
     steps = [
         ("abrir_app", lambda: step_open(ui)),
@@ -163,7 +188,7 @@ def step_ask(ui, rep):
     ui.tap_text(r"Faça uma pergunta ou crie algo", timeout=30)
     ui.type_text(QUESTION)
     ui.tap_text(r"Enviar mensagem", timeout=20, clickable_only=True)
-    deadline = time.time() + 150
+    deadline = time.time() + 240
     answer = None
     while time.time() < deadline:
         texts = ui.texts()
@@ -177,7 +202,10 @@ def step_ask(ui, rep):
         time.sleep(3)
     ui.screenshot("resposta")
     if answer is None:
-        raise TimeoutError("nenhuma resposta do modelo em 150 s")
+        log = ui.adb("logcat", "-d", "-t", "600", timeout=60).decode("utf-8", "replace")
+        with open(os.path.join(ui.out, "logcat-app.txt"), "w", encoding="utf-8") as fh:
+            fh.write(log)
+        raise TimeoutError("nenhuma resposta do modelo em 240 s (logcat salvo em logcat-app.txt)")
     if answer.startswith("ERRO"):
         raise RuntimeError(answer)
     ok = bool(re.search(r"\b30\b", answer))
