@@ -215,7 +215,20 @@ def step_ask(ui, rep):
 
 
 if __name__ == "__main__":
+    import traceback
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="e2e-artifacts")
     parser.add_argument("--serial", default=None)
-    sys.exit(run(parser.parse_args()))
+    args = parser.parse_args()
+    os.makedirs(args.out, exist_ok=True)
+    try:
+        sys.exit(run(args))
+    except SystemExit:
+        raise
+    except BaseException:
+        # Erro inesperado do próprio roteiro: fica salvo nos artefatos publicados.
+        with open(os.path.join(args.out, "driver-error.txt"), "w", encoding="utf-8") as fh:
+            fh.write(traceback.format_exc())
+        print(traceback.format_exc(), flush=True)
+        sys.exit(2)
