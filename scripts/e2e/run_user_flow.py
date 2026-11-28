@@ -114,8 +114,8 @@ def step_create_notebook(ui):
 
 def step_import_txt(ui):
     ui.tap_text(r"^Fontes$", timeout=30, clickable_only=True)
-    ui.tap_text(r"Importar primeira fonte|Importar fonte|Adicionar fonte", timeout=30)
-    ui.tap_text(r"Arquivo|Documento|Escolher arquivo|Importar arquivo", timeout=30)
+    # A aba Fontes mostra direto as opções: Arquivos, Criar nota, Adicionar URL, Google Drive.
+    ui.tap_text(r"^Arquivos$", timeout=30, clickable_only=True)
     # Seletor do sistema (Storage Access Framework): Downloads -> arquivo de perfil.
     ui.tap_text(r"Downloads|Transferências|Baixados", timeout=40)
     ui.tap_text(PROFILE_NAME.replace(".", r"\."), timeout=40)
