@@ -125,6 +125,10 @@ class Ui:
             return png, texts
         return png, []
 
+    def device_back(self):
+        self.adb("shell", "input", "keyevent", "4")
+        time.sleep(1.2)
+
     def texts(self, root=None):
         root = root if root is not None else self.dump()
         return [n.get("text") for n in self._nodes(root) if n.get("text")]
