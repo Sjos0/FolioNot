@@ -55,14 +55,27 @@ class Ui:
     def find(self, pattern, root=None, clickable_only=False):
         root = root if root is not None else self.dump()
         rx = re.compile(pattern, re.IGNORECASE)
+        parents = {child: parent for parent in root.iter() for child in parent}
         for node in self._nodes(root):
             label = f"{node.get('text', '')} {node.get('content-desc', '')}"
-            if rx.search(label):
-                if clickable_only and node.get("clickable") != "true":
-                    continue
-                if self._center(node.get("bounds")):
-                    return node
+            if not rx.search(label) or not self._center(node.get("bounds")):
+                continue
+            if clickable_only and not self._is_clickable(node, parents):
+                continue
+            return node
         return None
+
+    @staticmethod
+    def _is_clickable(node, parents):
+        # No Compose, o texto costuma ser filho de um nó clicável: sobe a hierarquia até achar.
+        current = node
+        for _ in range(6):
+            if current.get("clickable") == "true":
+                return True
+            current = parents.get(current)
+            if current is None:
+                return False
+        return False
 
     def wait_for(self, pattern, timeout=30, clickable_only=False):
         deadline = time.time() + timeout
