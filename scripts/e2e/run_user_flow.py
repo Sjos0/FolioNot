@@ -183,11 +183,17 @@ def step_embedding_offline(ui):
 
 
 def step_ask(ui, rep):
-    ui.device_back()
+    ui.device_back()  # volta do editor de provedores para o workspace (se a tela não for o workspace, a aba falha)
     ui.tap_text(r"^Chat$", timeout=30, clickable_only=True)
     ui.tap_text(r"Faça uma pergunta ou crie algo", timeout=30)
     ui.type_text(QUESTION)
+    ui.screenshot("pergunta_digitada")
+    if ui.keyboard_visible():
+        ui.adb("shell", "input", "keyevent", "4")  # fecha só o teclado (não há sheet aberta aqui)
+        time.sleep(1)
     ui.tap_text(r"Enviar mensagem", timeout=20, clickable_only=True)
+    time.sleep(3)
+    ui.screenshot("depois_de_enviar")
     deadline = time.time() + 240
     answer = None
     while time.time() < deadline:
@@ -202,14 +208,14 @@ def step_ask(ui, rep):
         time.sleep(3)
     ui.screenshot("resposta")
     if answer is None:
-        log = ui.adb("logcat", "-d", "-t", "600", timeout=60).decode("utf-8", "replace")
+        log = ui.adb("logcat", "-d", timeout=60).decode("utf-8", "replace")
+        keep = [ln for ln in log.splitlines() if re.search(r"folionote|okhttp|kilo|ChatOrchestrator|StreamResponse", ln, re.IGNORECASE)]
         with open(os.path.join(ui.out, "logcat-app.txt"), "w", encoding="utf-8") as fh:
-            fh.write(log)
-        raise TimeoutError("nenhuma resposta do modelo em 240 s (logcat salvo em logcat-app.txt)")
+            fh.write("\n".join(keep[-400:]))
+        raise TimeoutError("nenhuma resposta do modelo em 240 s (logcat do app em logcat-app.txt)")
     if answer.startswith("ERRO"):
         raise RuntimeError(answer)
-    ok = bool(re.search(r"\b30\b", answer))
-    if not ok:
+    if not re.search(r"\b30\b", answer):
         raise AssertionError("resposta sem a idade esperada (30): " + answer[:300])
     return "resposta contém nome e idade"
 

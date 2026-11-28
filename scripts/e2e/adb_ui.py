@@ -160,6 +160,10 @@ class Ui:
             self.adb("shell", "input", "keyevent", "67")  # DEL
         self.type_text(text)
 
+    def keyboard_visible(self):
+        out = self.adb("shell", "dumpsys", "input_method").decode("utf-8", "replace")
+        return "mInputShown=true" in out or "mIsInputViewShown=true" in out
+
     def device_back(self):
         self.adb("shell", "input", "keyevent", "4")
         time.sleep(1.2)
