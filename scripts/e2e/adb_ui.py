@@ -77,14 +77,21 @@ class Ui:
                 return False
         return False
 
-    def wait_for(self, pattern, timeout=30, clickable_only=False):
+    def wait_for(self, pattern, timeout=30, clickable_only=False, scroll=True):
+        """Espera o elemento. Se não estiver visível, rola a tela para cima e tenta de novo."""
         deadline = time.time() + timeout
+        swipes = 0
         while time.time() < deadline:
             node = self.find(pattern, clickable_only=clickable_only)
             if node is not None:
                 return node
-            time.sleep(1)
-        raise TimeoutError(f"não apareceu na tela: {pattern!r}")
+            if scroll and swipes < 12:
+                self.adb("shell", "input", "swipe", "540", "1500", "540", "700", "300")
+                swipes += 1
+                time.sleep(0.8)
+            else:
+                time.sleep(1)
+        raise TimeoutError(f"não apareceu na tela: {pattern!r} (após {swipes} rolagens)")
 
     def tap_text(self, pattern, timeout=30, clickable_only=False):
         try:
