@@ -161,6 +161,7 @@ class FolioNoteApp : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
+        com.sjos.folionote.core.device.DevicePolicy.init(this)
         super.onCreate()
         runCatching { PDFBoxResourceLoader.init(applicationContext) }
         container = AppContainer(this)

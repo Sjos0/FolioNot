@@ -67,6 +67,21 @@ internal fun applyProviderHeaders(
     }
 }
 
+/**
+ * Decide o campo `input_type` (passage/query) de um embedding compatível com OpenAI.
+ * NVIDIA NIM e modelos "embedqa"/"nemotron" exigem o modo certo; OpenAI não aceita o campo.
+ */
+object EmbeddingRequestPolicy {
+    fun inputTypeFor(baseUrl: String, modelId: String, taskType: EmbeddingTaskType): String? {
+        val host = baseUrl.lowercase()
+        val id = modelId.lowercase()
+        val needsInputType = host.contains("nvidia") ||
+            id.contains("embedqa") || id.contains("nemotron") || id.contains("nv-embed")
+        if (!needsInputType) return null
+        return if (taskType == EmbeddingTaskType.QUERY) "query" else "passage"
+    }
+}
+
 class OpenAiCompatibleEmbeddingProvider(
     private val cryptoManager: KeystoreCryptoManager,
     private val baseHttpClient: OkHttpClient = SharedHttpClients.defaultClient
@@ -92,6 +107,7 @@ class OpenAiCompatibleEmbeddingProvider(
             put("model", model.modelId)
             put("input", JSONArray(texts))
             model.embeddingDimensions?.takeIf { it > 0 }?.let { put("dimensions", it) }
+            EmbeddingRequestPolicy.inputTypeFor(provider.baseUrl, model.modelId, taskType)?.let { put("input_type", it) }
         }
 
         val reqBuilder = Request.Builder()
