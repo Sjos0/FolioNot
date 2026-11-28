@@ -68,7 +68,7 @@ jobs:
           set -o pipefail
           mkdir -p e2e-artifacts
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:assembleDebug -Pe2eEmulator=true 2>&1 | tee e2e-artifacts/build.log
+          ./gradlew --no-daemon :app:assembleDebug -Pe2eEmulator=true -PappVersionName=1.0.1-e2e -PappVersionCode=300000000 2>&1 | tee e2e-artifacts/build.log
 
       - name: Cache AVD
         uses: actions/cache@v4

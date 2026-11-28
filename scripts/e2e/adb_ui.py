@@ -79,7 +79,28 @@ class Ui:
         self.adb("shell", "input", "text", escaped)
         time.sleep(0.8)
 
+    def settle(self, timeout=20):
+        """Espera a hierarquia da tela parar de mudar (evita print antes do primeiro frame)."""
+        deadline = time.time() + timeout
+        last = None
+        while time.time() < deadline:
+            current = tuple(self.texts())
+            if current and current == last:
+                time.sleep(1.0)
+                return
+            last = current
+            time.sleep(1.0)
+
+    def dismiss_if_present(self, pattern, timeout=8):
+        """Fecha um diálogo opcional (ex.: aviso de atualização) se ele aparecer."""
+        try:
+            self.tap_text(pattern, timeout=timeout, clickable_only=True)
+            return True
+        except TimeoutError:
+            return False
+
     def screenshot(self, name, dump=True):
+        self.settle()
         self.shot_index += 1
         base = f"{self.shot_index:02d}-{name}"
         png = os.path.join(self.out, base + ".png")

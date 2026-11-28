@@ -98,8 +98,9 @@ def run(args):
 def step_open(ui):
     ui.adb("shell", "am", "force-stop", PKG)
     ui.adb("shell", "monkey", "-p", PKG, "-c", "android.intent.category.LAUNCHER", "1")
-    time.sleep(4)
-    return "app iniciado"
+    ui.settle()
+    closed = ui.dismiss_if_present(r"^Fechar$")
+    return "app iniciado" + (" (aviso de atualização fechado)" if closed else "")
 
 
 def step_create_notebook(ui):
