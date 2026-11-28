@@ -159,6 +159,9 @@ def step_configure_chat_provider(ui, model_id):
     ui.screenshot("formulario_provedor_vazio")
     ui.tap_text(r"Nome do provedor", timeout=20)
     ui.type_text("Kilo Gateway")
+    if ui.keyboard_visible():
+        ui.adb("shell", "input", "keyevent", "4")  # fecha só o teclado, para o campo de URL ficar visível
+        time.sleep(1)
     # O formulário já vem com o endereço da OpenAI; troca pelo gateway do Kilo.
     ui.replace_text(r"^https://api\.openai\.com/v1$", KILO_BASE, timeout=20)
     ui.screenshot("formulario_provedor_preenchido")
@@ -199,7 +202,7 @@ def step_ask(ui, rep):
     while time.time() < deadline:
         texts = ui.texts()
         joined = " ".join(texts)
-        if re.search(r"Erro na requisi", joined, re.IGNORECASE):
+        if re.search(r"Erro na requisi|Chave de API inválida|inválida ou ausente|HTTP \d{3}", joined, re.IGNORECASE):
             answer = "ERRO: " + joined[:600]
             break
         if re.search(r"Samuka", joined, re.IGNORECASE):

@@ -105,7 +105,7 @@ interface PdfPageRenderer {
 }
 
 class AndroidPdfPageRenderer(
-    private val maxDimensionPx: Int = 1500
+    private val maxDimensionPx: Int = com.sjos.folionote.core.device.DevicePolicy.ocrMaxDimensionPx
 ) : PdfPageRenderer {
 
     override fun renderPdfPagesToPngBytes(file: File): List<Pair<Int, ByteArray>> {
